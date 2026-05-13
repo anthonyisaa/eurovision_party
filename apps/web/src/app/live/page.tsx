@@ -4,28 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/supabase-browser';
 import { getGuestIdClient } from '@/lib/guest-id';
+import { useCurrentEvent } from '@/lib/use-current-event';
+import { useEventTimeline } from '@/lib/use-event-timeline';
 import { submitReaction } from '../actions/reactions';
 import { triggerRoast } from '../actions/roast';
 import type { Database } from '@eurojury/db/types';
 
 type Country = Database['public']['Tables']['countries']['Row'];
-type EventRow = Database['public']['Tables']['event_timeline']['Row'];
 type Reaction = Database['public']['Tables']['reactions']['Row'];
-
-interface PartyState {
-  id: string;
-  phase: string;
-  yt_current_seconds: number | null;
-  manual_event_idx: number | null;
-  party_paused: boolean;
-}
-
-interface CurrentEvent {
-  row: EventRow;
-  performanceCount: number;
-  performanceIndex: number; // 1-based position among performances
-  startSeconds: number;
-}
 
 const PARTY_ID = process.env.NEXT_PUBLIC_PARTY_ID!;
 const REACTION_WINDOW_SECONDS = 90;
@@ -38,39 +24,17 @@ const REACTIONS = [
   { rating: 5, emoji: '🤯', label: 'iconic' },
 ] as const;
 
-// Simple inline derivation per the brief. Agent C will refactor to lib/derive-event.ts.
-// Rules:
-//  - If manual_event_idx is set, that row wins.
-//  - Otherwise find the row whose [start_seconds, end_seconds) contains yt_current_seconds.
-//  - end_seconds may be null (open-ended event) — match if start <= ytSec.
-function deriveCurrentEvent(
-  timeline: EventRow[],
-  ytSec: number | null,
-  manualIdx: number | null,
-): EventRow | null {
-  if (!timeline.length) return null;
-  if (manualIdx != null) {
-    return timeline.find((r) => r.idx === manualIdx) ?? null;
-  }
-  if (ytSec == null) return null;
-  // Sort defensive copy — DB returns by primary key normally but we don't rely on it.
-  const sorted = [...timeline].sort((a, b) => a.start_seconds - b.start_seconds);
-  let match: EventRow | null = null;
-  for (const r of sorted) {
-    if (r.start_seconds > ytSec) break;
-    if (r.end_seconds == null || ytSec < r.end_seconds) match = r;
-  }
-  return match;
-}
-
 // /live — phone-only minimal UI. Big now-playing card + 5 reaction buttons + roast button.
 // No commentary feed. No chat. Per project memory: phones are dumb devices.
+//
+// All event-derivation logic lives in `useCurrentEvent` (which composes
+// `useParty` + `useEventTimeline` + the pure `deriveEvent` lib). This page
+// only owns UI state: which reaction the guest tapped, whether the roast
+// has been spent for this event, and the country lookup table.
 export default function LivePage() {
   const router = useRouter();
   const supabase = useMemo(() => supabaseBrowser(), []);
   const [guestId, setGuestId] = useState<string | null>(null);
-  const [party, setParty] = useState<PartyState | null>(null);
-  const [timeline, setTimeline] = useState<EventRow[]>([]);
   const [countriesByCode, setCountriesByCode] = useState<Record<string, Country>>({});
   const [myReactions, setMyReactions] = useState<Record<string, Reaction>>({});
   const [hasUnfiredRoast, setHasUnfiredRoast] = useState(false);
@@ -79,26 +43,18 @@ export default function LivePage() {
   const [pending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
 
-  // Initial bootstrap.
+  // Shared event/timeline subscriptions — same data /tv consumes.
+  const { current, effectiveSeconds, effectivePaused } = useCurrentEvent(PARTY_ID);
+  const { timeline } = useEventTimeline(PARTY_ID);
+
+  // Initial bootstrap — guest id, country lookup, this guest's prior reactions.
   useEffect(() => {
     const gid = getGuestIdClient();
     setGuestId(gid);
     let cancelled = false;
     (async () => {
-      // Sequential awaits — see comment in /lobby for why.
-      const partyRes = await supabase
-        .from('parties')
-        .select('id, phase, yt_current_seconds, manual_event_idx, party_paused')
-        .eq('id', PARTY_ID)
-        .single();
-      const timelineRes = await supabase
-        .from('event_timeline')
-        .select('*')
-        .eq('party_id', PARTY_ID);
       const countriesRes = await supabase.from('countries').select('*');
       if (cancelled) return;
-      if (partyRes.data) setParty(partyRes.data as PartyState);
-      setTimeline(timelineRes.data ?? []);
       const byCode: Record<string, Country> = {};
       for (const c of countriesRes.data ?? []) byCode[c.code] = c;
       setCountriesByCode(byCode);
@@ -126,26 +82,52 @@ export default function LivePage() {
     if (loaded && !guestId) router.replace('/');
   }, [loaded, guestId, router]);
 
-  // Realtime: parties + event_timeline + scheduled_commentary (for roast availability).
+  // Performance index (1-based) for the "Performance N of M" pill.
+  const performanceInfo = useMemo(() => {
+    if (!current || current.category !== 'performance') {
+      return { index: 0, count: 0 };
+    }
+    const performances = timeline.filter((r) => r.category === 'performance');
+    const idx = performances.findIndex((r) => r.idx === current.idx) + 1;
+    return { index: idx, count: performances.length };
+  }, [current, timeline]);
+
+  // Reaction window check (per-event). Uses `effectiveSeconds` from the
+  // derive hook so this Just Works under fake_broadcast as well as real
+  // YouTube playback.
+  const reactionWindowOpen = useMemo(() => {
+    if (!current) return false;
+    if (effectivePaused) return false;
+    if (current.category !== 'performance') return false;
+    return (
+      effectiveSeconds >= current.startSeconds &&
+      effectiveSeconds < current.startSeconds + REACTION_WINDOW_SECONDS
+    );
+  }, [current, effectiveSeconds, effectivePaused]);
+
+  // Check for unfired roast for current event. Re-runs whenever the current
+  // event changes; a separate Realtime subscription on scheduled_commentary
+  // catches mid-event updates (e.g. the host marked one fired from /tv).
   useEffect(() => {
+    if (!current) {
+      setHasUnfiredRoast(false);
+      return;
+    }
+    let cancelled = false;
+    const fetchAvail = () =>
+      supabase
+        .from('scheduled_commentary')
+        .select('id', { count: 'exact', head: true })
+        .eq('party_id', PARTY_ID)
+        .eq('event_idx', current.idx)
+        .eq('category', 'roast')
+        .eq('fired', false)
+        .then(({ count }) => {
+          if (!cancelled) setHasUnfiredRoast((count ?? 0) > 0);
+        });
+    fetchAvail();
     const chan = supabase
-      .channel(`live:${PARTY_ID}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'parties', filter: `id=eq.${PARTY_ID}` },
-        (payload) => setParty(payload.new as PartyState),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'event_timeline', filter: `party_id=eq.${PARTY_ID}` },
-        () => {
-          supabase
-            .from('event_timeline')
-            .select('*')
-            .eq('party_id', PARTY_ID)
-            .then(({ data }) => setTimeline(data ?? []));
-        },
-      )
+      .channel(`roast-avail:${PARTY_ID}:${current.idx}`)
       .on(
         'postgres_changes',
         {
@@ -155,69 +137,15 @@ export default function LivePage() {
           filter: `party_id=eq.${PARTY_ID}`,
         },
         () => {
-          // Cheap refresh — roast availability is recomputed when the current
-          // event changes anyway, but this catches mid-event updates.
-          setHasUnfiredRoast((prev) => prev);
+          fetchAvail();
         },
       )
       .subscribe();
     return () => {
+      cancelled = true;
       supabase.removeChannel(chan);
     };
-  }, [supabase]);
-
-  // Derive current event.
-  const current: CurrentEvent | null = useMemo(() => {
-    if (!party) return null;
-    const row = deriveCurrentEvent(
-      timeline,
-      party.yt_current_seconds ?? null,
-      party.manual_event_idx,
-    );
-    if (!row) return null;
-    const performances = timeline.filter((r) => r.category === 'performance');
-    const pIdx =
-      row.category === 'performance'
-        ? performances.findIndex((r) => r.idx === row.idx) + 1
-        : 0;
-    return {
-      row,
-      performanceCount: performances.length,
-      performanceIndex: pIdx,
-      startSeconds: row.start_seconds,
-    };
-  }, [party, timeline]);
-
-  // Reaction window check (per-event).
-  const reactionWindowOpen = useMemo(() => {
-    if (!current || !party) return false;
-    if (party.party_paused) return false;
-    if (current.row.category !== 'performance') return false;
-    const yt = party.yt_current_seconds ?? 0;
-    return yt >= current.startSeconds && yt < current.startSeconds + REACTION_WINDOW_SECONDS;
-  }, [current, party]);
-
-  // Check for unfired roast for current event.
-  useEffect(() => {
-    if (!current) {
-      setHasUnfiredRoast(false);
-      return;
-    }
-    let cancelled = false;
-    supabase
-      .from('scheduled_commentary')
-      .select('id', { count: 'exact', head: true })
-      .eq('party_id', PARTY_ID)
-      .eq('event_idx', current.row.idx)
-      .eq('category', 'roast')
-      .eq('fired', false)
-      .then(({ count }) => {
-        if (!cancelled) setHasUnfiredRoast((count ?? 0) > 0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, current?.row.idx, current]);
+  }, [supabase, current?.idx, current]);
 
   // Track roast use in localStorage so a guest can't spam-fire per event.
   const roastUsedThisEvent = useCallback(
@@ -255,9 +183,9 @@ export default function LivePage() {
 
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onReact = (rating: number) => {
-    if (!guestId || !current || current.row.country_code == null) return;
+    if (!guestId || !current || current.countryCode == null) return;
     if (!reactionWindowOpen) return;
-    const country = current.row.country_code;
+    const country = current.countryCode;
     setFlashRating(rating);
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashRating(null), 500);
@@ -286,12 +214,12 @@ export default function LivePage() {
 
   const onRoast = () => {
     if (!guestId || !current) return;
-    if (roastUsedThisEvent(current.row.idx)) return;
-    markRoastUsed(current.row.idx);
+    if (roastUsedThisEvent(current.idx)) return;
+    markRoastUsed(current.idx);
     setRoastToast('🎤 sent!');
     setTimeout(() => setRoastToast(null), 1800);
     startTransition(async () => {
-      const res = await triggerRoast(PARTY_ID, current.row.idx, guestId);
+      const res = await triggerRoast(PARTY_ID, current.idx, guestId);
       if (!res.ok) {
         // Reverse the rate-limit token if it actually failed so they can retry.
         try {
@@ -299,7 +227,7 @@ export default function LivePage() {
           const keys: string[] = JSON.parse(raw);
           window.localStorage.setItem(
             ROAST_STORAGE_KEY,
-            JSON.stringify(keys.filter((k) => k !== `${current.row.idx}:${guestId}`)),
+            JSON.stringify(keys.filter((k) => k !== `${current.idx}:${guestId}`)),
           );
         } catch {
           /* ignore */
@@ -319,19 +247,17 @@ export default function LivePage() {
   }
   if (!guestId) return null;
 
-  const country = current?.row.country_code
-    ? countriesByCode[current.row.country_code]
-    : null;
+  const country = current?.countryCode ? countriesByCode[current.countryCode] : null;
   const myRatingHere =
-    current?.row.country_code != null
-      ? myReactions[current.row.country_code]?.rating ?? null
+    current?.countryCode != null
+      ? myReactions[current.countryCode]?.rating ?? null
       : null;
 
-  const isPerformance = current?.row.category === 'performance';
+  const isPerformance = current?.category === 'performance';
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-6">
-      {party?.party_paused && (
+      {effectivePaused && (
         <div className="mb-3 rounded-full bg-eurogold-500/20 px-3 py-1 text-center text-xs font-semibold text-eurogold-400">
           ⏸️ Paused
         </div>
@@ -350,16 +276,16 @@ export default function LivePage() {
                 {[country.artist, country.song_title].filter(Boolean).join(' — ')}
               </p>
             )}
-            {isPerformance && current && (
+            {isPerformance && performanceInfo.count > 0 && (
               <p className="mt-2 text-xs uppercase tracking-widest text-eurogold-400">
-                Performance {current.performanceIndex} of {current.performanceCount}
+                Performance {performanceInfo.index} of {performanceInfo.count}
               </p>
             )}
           </>
         ) : (
           <>
             <div className="text-6xl">📺</div>
-            <h1 className="mt-3 text-xl font-bold">{current?.row.description ?? 'Waiting for the show'}</h1>
+            <h1 className="mt-3 text-xl font-bold">{current?.description ?? 'Waiting for the show'}</h1>
           </>
         )}
       </section>
@@ -412,7 +338,7 @@ export default function LivePage() {
       </section>
 
       {/* Roast button */}
-      {isPerformance && hasUnfiredRoast && !roastUsedThisEvent(current!.row.idx) && (
+      {isPerformance && current && hasUnfiredRoast && !roastUsedThisEvent(current.idx) && (
         <button
           onClick={onRoast}
           disabled={pending}

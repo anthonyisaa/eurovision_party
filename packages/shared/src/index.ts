@@ -27,3 +27,6 @@ export interface CurrentEvent {
   endSeconds: number | null;
   songIdx: number | null;
 }
+
+export { deriveEvent } from './derive-event';
+export type { DeriveEventInput, DeriveEventOutput } from './derive-event';
