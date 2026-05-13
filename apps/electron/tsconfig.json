@@ -3,10 +3,18 @@
   "compilerOptions": {
     "outDir": "dist",
     "noEmit": false,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "rootDir": ".",
-    "types": ["node"]
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    // Strip type-only imports so the cross-workspace packages/db/types.ts
+    // never gets pulled into emit. Combined with `import type Database`,
+    // this keeps main.js at dist/main.js rather than nested.
+    "importsNotUsedAsValues": "remove"
   },
   "include": ["main.ts", "preload-youtube.ts"]
 }

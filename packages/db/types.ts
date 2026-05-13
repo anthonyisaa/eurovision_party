@@ -507,7 +507,40 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      assign_guest: {
+        Args: { p_display: string; p_guest_id: string; p_party_id: string }
+        Returns: {
+          assigned_country_1: string | null
+          assigned_country_2: string | null
+          display_name: string
+          id: string
+          joined_at: string
+          party_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "guests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      claim_host: {
+        Args: { p_guest_id: string; p_party_id: string }
+        Returns: string
+      }
+      fire_due_commentary: {
+        Args: { p_party_id: string; p_seconds: number }
+        Returns: {
+          content: string
+          event_idx: number
+          id: string
+          speaker: string
+        }[]
+      }
+      ingest_payload: {
+        Args: { p_party_id: string; p_payload: Json }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
