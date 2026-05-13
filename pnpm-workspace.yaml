@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Approve postinstall build scripts that we actually need. Electron's
+# postinstall downloads the binary; esbuild/sharp/unrs-resolver compile
+# native deps used by Next.js + Vite.
+allowBuilds:
+  electron: true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

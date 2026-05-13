@@ -1,0 +1,19 @@
+{
+  "name": "@eurojury/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'shared: nothing to build (source-only package)'",
+    "test": "echo 'shared: no tests'"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

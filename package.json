@@ -1,0 +1,14 @@
+{
+  "name": "eurojury",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "dev": "pnpm --filter @eurojury/web dev",
+    "dev:electron": "pnpm --filter @eurojury/electron dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm --filter @eurojury/web lint"
+  }
+}

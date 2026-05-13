@@ -1,0 +1,25 @@
+{
+  "name": "@eurojury/electron",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx main.ts",
+    "build": "tsc",
+    "start": "electron dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'electron: no tests'"
+  },
+  "dependencies": {
+    "@eurojury/db": "workspace:*",
+    "@eurojury/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "electron": "^31.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
