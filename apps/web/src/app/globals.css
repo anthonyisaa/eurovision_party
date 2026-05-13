@@ -26,26 +26,29 @@
     --radius: 0.5rem;
   }
 
+  /* Warm dark "Eurovision-after-midnight" palette. Background is deep purple-black,
+     primary is hot pink for big CTAs, accent is purple. Tweaked from shadcn's neutral
+     default so the app doesn't look like a generic admin tool. */
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --background: 270 30% 6%;
+    --foreground: 40 30% 96%;
+    --card: 270 25% 9%;
+    --card-foreground: 40 30% 96%;
+    --popover: 270 25% 9%;
+    --popover-foreground: 40 30% 96%;
+    --primary: 330 85% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 270 20% 18%;
+    --secondary-foreground: 40 30% 96%;
+    --muted: 270 15% 16%;
+    --muted-foreground: 270 10% 70%;
+    --accent: 270 60% 45%;
+    --accent-foreground: 40 30% 96%;
+    --destructive: 0 70% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 270 20% 22%;
+    --input: 270 20% 18%;
+    --ring: 330 85% 60%;
   }
 
   * {
@@ -54,6 +57,11 @@
 
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 15% -10%, rgba(236, 72, 153, 0.18), transparent 55%),
+      radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.18), transparent 50%),
+      radial-gradient(circle at 50% 110%, rgba(234, 179, 8, 0.10), transparent 55%);
+    background-attachment: fixed;
   }
 }
 
