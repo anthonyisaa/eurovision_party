@@ -32,17 +32,24 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 const {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
+  SUPABASE_ANON_KEY,
   PARTY_ID,
   YT_VIDEO_ID,
   WEB_URL = 'http://localhost:3000',
 } = process.env;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !PARTY_ID || !YT_VIDEO_ID) {
+// Prefer service-role if set (bypasses RLS); fall back to anon. After
+// the 0008_anon_writes migration the anon key is sufficient for the
+// writes this process performs (parties update, scheduled_commentary
+// update via RPC, chat_messages insert).
+const supabaseKey = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !supabaseKey || !PARTY_ID || !YT_VIDEO_ID) {
   console.error(
     '[eurojury] Missing required env vars in apps/electron/.env:',
   );
   console.error(
-    '  SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, PARTY_ID, YT_VIDEO_ID',
+    '  SUPABASE_URL, (SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY), PARTY_ID, YT_VIDEO_ID',
   );
   process.exit(1);
 }
@@ -52,7 +59,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !PARTY_ID || !YT_VIDEO_ID) {
 // All SQL is small and well-scoped; the trade-off is acceptable.
 const supabase: SupabaseClient = createClient(
   SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
+  supabaseKey,
   { auth: { autoRefreshToken: false, persistSession: false } },
 );
 
