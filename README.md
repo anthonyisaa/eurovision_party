@@ -146,24 +146,26 @@ This is also the recommended way to test the full app on day-of before the actua
 
 ---
 
-## Deploying to Vercel (so guests on cellular can join)
+## Deploying to Vercel
 
-If guests are on different networks than your laptop, deploy the web app:
+**Live URL: <https://eurojury.vercel.app/>** (production deployment).
+
+Re-deploy after changes:
 
 ```sh
-pnpm --filter @eurojury/web build  # verify it builds clean
+scripts/deploy-vercel.sh
 ```
 
-Then via the Vercel CLI or dashboard, deploy the `apps/web` directory. Configure these env vars in the Vercel project:
+The script flattens the pnpm workspace via `pnpm deploy --legacy` into `/tmp/eurojury-deploy`, inlines `packages/db` + `packages/shared` as `file:` deps, and deploys via the Vercel CLI. This avoids the Vercel monorepo Root-Directory dashboard config that's not settable from `vercel.json`.
 
-- `NEXT_PUBLIC_SUPABASE_URL` = `https://euhwxkwpnskjmngjfqtd.supabase.co`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` = (publishable key — same as local)
-- `NEXT_PUBLIC_PARTY_ID` = the party UUID
-- `SUPABASE_SERVICE_ROLE_KEY` = the service-role key
+Production env vars are already set on the Vercel project:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_PARTY_ID`
 
-The Electron app stays on your laptop and points at the same Supabase project — the deployed web app shares the DB.
+(All set with `--no-sensitive` so Next can read them at build time.)
 
-Once deployed, update `apps/electron/.env` `WEB_URL` to the Vercel URL so the /tv overlay loads from prod.
+The Electron app stays on your laptop and points at the same Supabase project. Update `apps/electron/.env` `WEB_URL` to `https://eurojury.vercel.app` so the /tv overlay loads from prod (avoids needing the laptop's web app for guest joins on cellular).
 
 ---
 
