@@ -22,7 +22,7 @@
 // All data flows through the shared hooks (`useParty`, `useEventTimeline`,
 // `useCurrentEvent`). The page never writes to Supabase — pure reader.
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
@@ -168,6 +168,7 @@ function TvPageInner() {
             isElectron={isElectron}
             current={current}
             timeline={timeline}
+            ytVideoId={party?.yt_video_id ?? null}
           />
         )}
         {phase === 'voting' && (
@@ -358,11 +359,13 @@ function LivePhase({
   isElectron,
   current,
   timeline,
+  ytVideoId,
 }: {
   partyId: string;
   isElectron: boolean;
   current: ReturnType<typeof useCurrentEvent>['current'];
   timeline: Database['public']['Tables']['event_timeline']['Row'][];
+  ytVideoId: string | null;
 }) {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const [countriesByCode, setCountriesByCode] = useState<
@@ -529,19 +532,183 @@ function LivePhase({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 px-8 py-10"
+      className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-6 px-6 py-6"
     >
-      <NowPlayingCard
-        current={current}
-        country={country}
-        performanceInfo={performanceInfo}
-        variant="hero"
-      />
-      <div className="grid gap-6 md:grid-cols-2">
-        <ReactionsBar counts={reactionCounts} variant="hero" />
-        <BubbleStack bubbles={visibleBubbles} variant="hero" />
-      </div>
+      {ytVideoId ? (
+        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          {/* Left: video player */}
+          <div className="space-y-4">
+            <YouTubeEmbed videoId={ytVideoId} partyId={partyId} />
+            <NowPlayingCard
+              current={current}
+              country={country}
+              performanceInfo={performanceInfo}
+              variant="hero"
+            />
+          </div>
+          {/* Right: commentary stack */}
+          <aside className="space-y-4">
+            <BubbleStack bubbles={visibleBubbles} variant="hero" />
+            <ReactionsBar counts={reactionCounts} variant="hero" />
+          </aside>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-xl border border-eurogold-500/40 bg-eurogold-500/10 p-4 text-sm">
+            <p className="font-semibold text-eurogold-400">No video set</p>
+            <p className="mt-1 text-muted-foreground">
+              Paste a payload (with{' '}
+              <code className="rounded bg-card/60 px-1">yt_video_id</code>) at{' '}
+              <code className="rounded bg-card/60 px-1">/admin/setup</code> to embed the broadcast here.
+            </p>
+          </div>
+          <NowPlayingCard
+            current={current}
+            country={country}
+            performanceInfo={performanceInfo}
+            variant="hero"
+          />
+          <div className="grid gap-6 md:grid-cols-2">
+            <ReactionsBar counts={reactionCounts} variant="hero" />
+            <BubbleStack bubbles={visibleBubbles} variant="hero" />
+          </div>
+        </>
+      )}
     </motion.section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// YouTubeEmbed — embeds the YT iframe player AND drives the broadcast tick
+// for non-Electron deployments. Polls the player's currentTime every 2s,
+// upserts parties.yt_current_seconds, and fires due scheduled_commentary via
+// the fire_due_commentary RPC (same flow as the Electron main process).
+//
+// Multiple open /tv tabs would all tick; that's safe because the RPC's
+// UPDATE ... WHERE fired=false is atomic. yt_current_seconds gets last-writer
+// wins, which is fine at party scale.
+// ---------------------------------------------------------------------------
+
+let ytApiPromise: Promise<void> | null = null;
+function loadYouTubeApi(): Promise<void> {
+  if (ytApiPromise) return ytApiPromise;
+  ytApiPromise = new Promise<void>((resolve) => {
+    if (typeof window === 'undefined') return resolve();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    if (w.YT && w.YT.Player) return resolve();
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+    const prev = w.onYouTubeIframeAPIReady;
+    w.onYouTubeIframeAPIReady = () => {
+      if (typeof prev === 'function') prev();
+      resolve();
+    };
+  });
+  return ytApiPromise;
+}
+
+function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<{ getCurrentTime: () => number; getPlayerState: () => number } | null>(null);
+  const supabase = useMemo(() => supabaseBrowser(), []);
+  const tickInFlight = useRef(false);
+  const elementId = useMemo(() => `yt-player-${Math.random().toString(36).slice(2, 8)}`, []);
+
+  // Mount the player.
+  useEffect(() => {
+    let cancelled = false;
+    loadYouTubeApi().then(() => {
+      if (cancelled || !containerRef.current) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const YT = (window as any).YT;
+      // The YT API replaces the div with the iframe; ensure we keep our wrapper.
+      playerRef.current = new YT.Player(elementId, {
+        videoId,
+        playerVars: {
+          autoplay: 1,
+          modestbranding: 1,
+          rel: 0,
+        },
+        events: {
+          onReady: (e: { target: { playVideo: () => void } }) => {
+            try {
+              e.target.playVideo();
+            } catch {
+              /* autoplay blocked — user has to click play */
+            }
+          },
+        },
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [videoId, elementId]);
+
+  // Tick loop: poll currentTime, upsert parties, fire due commentary.
+  useEffect(() => {
+    const tick = async () => {
+      if (tickInFlight.current) return;
+      const player = playerRef.current;
+      if (!player) return;
+      let currentTime: number;
+      let state: number;
+      try {
+        currentTime = player.getCurrentTime();
+        state = player.getPlayerState();
+      } catch {
+        return;
+      }
+      // YT.PlayerState.PLAYING === 1. Skip ticks while paused/buffering/ended.
+      if (state !== 1) return;
+      if (!Number.isFinite(currentTime) || currentTime <= 0) return;
+      tickInFlight.current = true;
+      try {
+        const seconds = Math.floor(currentTime);
+        await supabase
+          .from('parties')
+          .update({
+            yt_current_seconds: seconds,
+            yt_last_update_at: new Date().toISOString(),
+            yt_player_state: 'playing',
+          })
+          .eq('id', partyId);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: due } = await (supabase.rpc as any)('fire_due_commentary', {
+          p_party_id: partyId,
+          p_seconds: seconds,
+        });
+        for (const row of (due ?? []) as Array<{
+          id: string;
+          speaker: string;
+          content: string;
+          event_idx: number | null;
+        }>) {
+          await supabase.from('chat_messages').insert({
+            party_id: partyId,
+            is_commentator: true,
+            speaker: row.speaker,
+            content: row.content,
+            event_idx_at_post: row.event_idx,
+            kind: 'scheduled',
+          });
+        }
+      } finally {
+        tickInFlight.current = false;
+      }
+    };
+    const id = setInterval(tick, 2000);
+    return () => clearInterval(id);
+  }, [supabase, partyId]);
+
+  return (
+    <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/40 bg-black shadow-xl">
+      <div ref={containerRef} className="absolute inset-0">
+        <div id={elementId} className="h-full w-full" />
+      </div>
+    </div>
   );
 }
 
