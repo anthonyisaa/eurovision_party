@@ -239,10 +239,11 @@ function IngestSection({
       return;
     }
     setValidation({ ok: true });
+    const reactionEntries = (z.data.reaction_pool ?? []).length + (z.data.roast_pool ?? []).length;
     toast.success(
       `Valid: ${z.data.performances.length} performances, ` +
         `${z.data.scheduled_commentary.length} commentary, ` +
-        `${z.data.roast_pool.length} roasts, ` +
+        `${reactionEntries} reactions (roast/celebrate), ` +
         `${z.data.other_events.length} other events`,
     );
   };
@@ -260,7 +261,7 @@ function IngestSection({
       toast.success(
         `Ingested ${res.data.performances} performances, ` +
           `${res.data.scheduled_commentary} commentary, ` +
-          `${res.data.roast_pool} roasts, ` +
+          `${res.data.roast_pool} roasts, ${res.data.celebrate_pool ?? 0} celebrates, ` +
           `${res.data.other_events} other events`,
       );
     });
@@ -280,7 +281,7 @@ function IngestSection({
           spellCheck={false}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder='{"yt_video_id": "...", "performances": [...], "other_events": [...], "scheduled_commentary": [...], "roast_pool": [...]}'
+          placeholder='{"yt_video_id": "...", "performances": [...], "other_events": [...], "scheduled_commentary": [...], "reaction_pool": [{ "event_idx": 1, "kind": "roast"|"celebrate", "speaker": "nala"|"evee", "content": "..." }]}'
           className="font-mono text-xs"
         />
         <div className="flex flex-wrap gap-2">
@@ -303,8 +304,8 @@ function IngestSection({
           <div className="rounded-md border border-eurogold-500/40 bg-eurogold-500/10 p-3 text-sm">
             <p className="font-semibold text-eurogold-400">
               ✓ Ingested {counts.performances} performances, {counts.scheduled_commentary}{' '}
-              commentary lines, {counts.roast_pool} roast pool entries,{' '}
-              {counts.other_events} other events
+              commentary lines, {counts.roast_pool} roasts, {counts.celebrate_pool ?? 0}{' '}
+              celebrates, {counts.other_events} other events
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               countries_updated: {counts.countries_updated}

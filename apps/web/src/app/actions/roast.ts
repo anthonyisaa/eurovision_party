@@ -3,62 +3,62 @@
 import { z } from 'zod';
 import { supabaseService } from '@/lib/supabase-service';
 
+export type ReactionKind = 'roast' | 'celebrate';
+
 export type ActionResult<T> =
-  | { ok: true; data: { content: string; speaker: string } }
+  | { ok: true; data: T }
   | { ok: false; error: string };
 
-const RoastSchema = z.object({
+const ReactionSchema = z.object({
   partyId: z.string().uuid(),
   eventIdx: z.number().int().nonnegative(),
   guestId: z.string().uuid(),
+  kind: z.enum(['roast', 'celebrate']),
 });
 
+const FALLBACK_BY_KIND: Record<ReactionKind, string> = {
+  roast: 'Nala and Evee are speechless 🐱',
+  celebrate: "Nala and Evee are on their feet 🎉",
+};
+
 /**
- * Atomically claim an unconsumed roast for the current event.
+ * Atomically claim an unconsumed reaction line (roast or celebrate) for the
+ * current event. Concurrency: SELECT + UPDATE ... WHERE fired=false; if two
+ * phones race the second retries with the next candidate.
  *
- * Concurrency model: we issue an UPDATE ... RETURNING * with the condition
- * `fired = false` AND `id = <first candidate>`. If two phones race, only
- * one UPDATE flips the row; the other returns zero rows and we retry with
- * the next candidate. Friends-party scale (≤10 guests) means a tiny retry
- * loop is fine — no need for advisory locks.
- *
- * Per the brief: this never displays on the phone. It only inserts a
- * chat_messages row, which the /tv route subscribes to.
- *
- * Agent C will refactor this into a shared lib later; this implementation
- * is intentionally simple and self-contained.
+ * Inserts into chat_messages so /tv renders the bubble; never displays on
+ * the phone that triggered it (phones are dumb).
  */
-export async function triggerRoast(
+export async function triggerReaction(
   partyId: string,
   eventIdx: number,
   guestId: string,
-): Promise<ActionResult<{ content: string; speaker: string }>> {
-  const parsed = RoastSchema.safeParse({ partyId, eventIdx, guestId });
+  kind: ReactionKind,
+): Promise<ActionResult<{ content: string; speaker: string; kind: ReactionKind }>> {
+  const parsed = ReactionSchema.safeParse({ partyId, eventIdx, guestId, kind });
   if (!parsed.success) {
     return {
       ok: false,
-      error: parsed.error.issues[0]?.message ?? 'Invalid roast trigger',
+      error: parsed.error.issues[0]?.message ?? 'Invalid reaction trigger',
     };
   }
 
   const supabase = supabaseService();
 
-  // Try up to 5 candidates — by then the pool is realistically exhausted.
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const { data: candidates, error: selErr } = await supabase
       .from('scheduled_commentary')
       .select('id, content, speaker')
       .eq('party_id', parsed.data.partyId)
       .eq('event_idx', parsed.data.eventIdx)
-      .eq('category', 'roast')
+      .eq('category', parsed.data.kind)
       .eq('fired', false)
       .limit(1);
     if (selErr) {
       return { ok: false, error: selErr.message };
     }
     if (!candidates || candidates.length === 0) {
-      // Fallback line per the plan when the pool is exhausted.
-      const generic = 'Nala and Evee are speechless 🐱';
+      const generic = FALLBACK_BY_KIND[parsed.data.kind];
       const { error: chatErr } = await supabase.from('chat_messages').insert({
         party_id: parsed.data.partyId,
         guest_id: parsed.data.guestId,
@@ -66,9 +66,10 @@ export async function triggerRoast(
         speaker: 'nala',
         content: generic,
         event_idx_at_post: parsed.data.eventIdx,
+        kind: parsed.data.kind,
       });
       if (chatErr) return { ok: false, error: chatErr.message };
-      return { ok: true, data: { content: generic, speaker: 'nala' } };
+      return { ok: true, data: { content: generic, speaker: 'nala', kind: parsed.data.kind } };
     }
 
     const cand = candidates[0]!;
@@ -83,7 +84,6 @@ export async function triggerRoast(
       return { ok: false, error: updErr.message };
     }
     if (!claimed) {
-      // Someone else claimed it between our SELECT and UPDATE. Retry.
       continue;
     }
 
@@ -94,14 +94,24 @@ export async function triggerRoast(
       speaker: claimed.speaker,
       content: claimed.content,
       event_idx_at_post: parsed.data.eventIdx,
+      kind: parsed.data.kind,
     });
     if (chatErr) return { ok: false, error: chatErr.message };
 
     return {
       ok: true,
-      data: { content: claimed.content, speaker: claimed.speaker },
+      data: { content: claimed.content, speaker: claimed.speaker, kind: parsed.data.kind },
     };
   }
 
-  return { ok: false, error: 'Could not claim a roast — try again.' };
+  return { ok: false, error: `Could not claim a ${kind} — try again.` };
+}
+
+/** Back-compat shim: previous callers (and any cached client bundles) used triggerRoast. */
+export async function triggerRoast(
+  partyId: string,
+  eventIdx: number,
+  guestId: string,
+): Promise<ActionResult<{ content: string; speaker: string; kind: ReactionKind }>> {
+  return triggerReaction(partyId, eventIdx, guestId, 'roast');
 }

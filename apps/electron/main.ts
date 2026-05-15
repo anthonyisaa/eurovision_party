@@ -116,6 +116,7 @@ async function handleTick(currentTime: number) {
         speaker: row.speaker,
         content: row.content,
         event_idx_at_post: row.event_idx,
+        kind: 'scheduled',
       });
       if (chatErr) {
         console.error(

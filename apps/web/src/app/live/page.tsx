@@ -7,7 +7,7 @@ import { getGuestIdClient } from '@/lib/guest-id';
 import { useCurrentEvent } from '@/lib/use-current-event';
 import { useEventTimeline } from '@/lib/use-event-timeline';
 import { submitReaction } from '../actions/reactions';
-import { triggerRoast } from '../actions/roast';
+import { triggerReaction, type ReactionKind } from '../actions/roast';
 import type { Database } from '@eurojury/db/types';
 
 type Country = Database['public']['Tables']['countries']['Row'];
@@ -15,7 +15,26 @@ type Reaction = Database['public']['Tables']['reactions']['Row'];
 
 const PARTY_ID = process.env.NEXT_PUBLIC_PARTY_ID!;
 const REACTION_WINDOW_SECONDS = 90;
-const ROAST_STORAGE_KEY = 'eurojury_roasts_used';
+const REACTION_USED_KEY = 'eurojury_reactions_used';
+const REACTION_KINDS: ReadonlyArray<{
+  kind: ReactionKind;
+  label: string;
+  emoji: string;
+  className: string;
+}> = [
+  {
+    kind: 'roast',
+    label: 'Roast it',
+    emoji: '🔥',
+    className: 'bg-gradient-to-r from-eurorose-500 to-europurp-600 shadow-europurp-900/50',
+  },
+  {
+    kind: 'celebrate',
+    label: 'Celebrate it',
+    emoji: '🎉',
+    className: 'bg-gradient-to-r from-eurogold-400 to-eurogold-600 text-black shadow-eurogold-900/40',
+  },
+];
 const REACTIONS = [
   { rating: 1, emoji: '😍', label: 'love' },
   { rating: 2, emoji: '😂', label: 'lol' },
@@ -37,9 +56,12 @@ export default function LivePage() {
   const [guestId, setGuestId] = useState<string | null>(null);
   const [countriesByCode, setCountriesByCode] = useState<Record<string, Country>>({});
   const [myReactions, setMyReactions] = useState<Record<string, Reaction>>({});
-  const [hasUnfiredRoast, setHasUnfiredRoast] = useState(false);
+  const [hasUnfired, setHasUnfired] = useState<{ roast: boolean; celebrate: boolean }>({
+    roast: false,
+    celebrate: false,
+  });
   const [flashRating, setFlashRating] = useState<number | null>(null);
-  const [roastToast, setRoastToast] = useState<string | null>(null);
+  const [reactionToast, setReactionToast] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
 
@@ -105,29 +127,42 @@ export default function LivePage() {
     );
   }, [current, effectiveSeconds, effectivePaused]);
 
-  // Check for unfired roast for current event. Re-runs whenever the current
-  // event changes; a separate Realtime subscription on scheduled_commentary
-  // catches mid-event updates (e.g. the host marked one fired from /tv).
+  // Check for unfired roast/celebrate entries for current event. Refreshes
+  // whenever the current event changes; a Realtime subscription on
+  // scheduled_commentary catches mid-event updates.
   useEffect(() => {
     if (!current) {
-      setHasUnfiredRoast(false);
+      setHasUnfired({ roast: false, celebrate: false });
       return;
     }
     let cancelled = false;
-    const fetchAvail = () =>
-      supabase
-        .from('scheduled_commentary')
-        .select('id', { count: 'exact', head: true })
-        .eq('party_id', PARTY_ID)
-        .eq('event_idx', current.idx)
-        .eq('category', 'roast')
-        .eq('fired', false)
-        .then(({ count }) => {
-          if (!cancelled) setHasUnfiredRoast((count ?? 0) > 0);
+    const fetchAvail = async () => {
+      const [{ count: roastCount }, { count: celebCount }] = await Promise.all([
+        supabase
+          .from('scheduled_commentary')
+          .select('id', { count: 'exact', head: true })
+          .eq('party_id', PARTY_ID)
+          .eq('event_idx', current.idx)
+          .eq('category', 'roast')
+          .eq('fired', false),
+        supabase
+          .from('scheduled_commentary')
+          .select('id', { count: 'exact', head: true })
+          .eq('party_id', PARTY_ID)
+          .eq('event_idx', current.idx)
+          .eq('category', 'celebrate')
+          .eq('fired', false),
+      ]);
+      if (!cancelled) {
+        setHasUnfired({
+          roast: (roastCount ?? 0) > 0,
+          celebrate: (celebCount ?? 0) > 0,
         });
-    fetchAvail();
+      }
+    };
+    void fetchAvail();
     const chan = supabase
-      .channel(`roast-avail:${PARTY_ID}:${current.idx}`)
+      .channel(`reaction-avail:${PARTY_ID}:${current.idx}`)
       .on(
         'postgres_changes',
         {
@@ -137,7 +172,7 @@ export default function LivePage() {
           filter: `party_id=eq.${PARTY_ID}`,
         },
         () => {
-          fetchAvail();
+          void fetchAvail();
         },
       )
       .subscribe();
@@ -147,33 +182,51 @@ export default function LivePage() {
     };
   }, [supabase, current?.idx, current]);
 
-  // Track roast use in localStorage so a guest can't spam-fire per event.
-  const roastUsedThisEvent = useCallback(
-    (eventIdx: number) => {
+  // Track reaction use in localStorage so a guest can't spam-fire per event/kind.
+  // Storage shape: array of "<eventIdx>:<kind>:<guestId>" strings.
+  const reactionUsedThisEvent = useCallback(
+    (eventIdx: number, kind: ReactionKind) => {
       if (!guestId) return false;
       if (typeof window === 'undefined') return false;
       try {
-        const raw = window.localStorage.getItem(ROAST_STORAGE_KEY) ?? '[]';
+        const raw = window.localStorage.getItem(REACTION_USED_KEY) ?? '[]';
         const keys: string[] = JSON.parse(raw);
-        return keys.includes(`${eventIdx}:${guestId}`);
+        return keys.includes(`${eventIdx}:${kind}:${guestId}`);
       } catch {
         return false;
       }
     },
     [guestId],
   );
-  const markRoastUsed = useCallback(
-    (eventIdx: number) => {
+  const markReactionUsed = useCallback(
+    (eventIdx: number, kind: ReactionKind) => {
       if (!guestId) return;
       if (typeof window === 'undefined') return;
       try {
-        const raw = window.localStorage.getItem(ROAST_STORAGE_KEY) ?? '[]';
+        const raw = window.localStorage.getItem(REACTION_USED_KEY) ?? '[]';
         const keys: string[] = JSON.parse(raw);
-        const key = `${eventIdx}:${guestId}`;
+        const key = `${eventIdx}:${kind}:${guestId}`;
         if (!keys.includes(key)) {
           keys.push(key);
-          window.localStorage.setItem(ROAST_STORAGE_KEY, JSON.stringify(keys));
+          window.localStorage.setItem(REACTION_USED_KEY, JSON.stringify(keys));
         }
+      } catch {
+        /* ignore */
+      }
+    },
+    [guestId],
+  );
+  const unmarkReactionUsed = useCallback(
+    (eventIdx: number, kind: ReactionKind) => {
+      if (!guestId) return;
+      if (typeof window === 'undefined') return;
+      try {
+        const raw = window.localStorage.getItem(REACTION_USED_KEY) ?? '[]';
+        const keys: string[] = JSON.parse(raw);
+        window.localStorage.setItem(
+          REACTION_USED_KEY,
+          JSON.stringify(keys.filter((k) => k !== `${eventIdx}:${kind}:${guestId}`)),
+        );
       } catch {
         /* ignore */
       }
@@ -212,28 +265,19 @@ export default function LivePage() {
     });
   };
 
-  const onRoast = () => {
+  const onReaction = (kind: ReactionKind) => {
     if (!guestId || !current) return;
-    if (roastUsedThisEvent(current.idx)) return;
-    markRoastUsed(current.idx);
-    setRoastToast('🎤 sent!');
-    setTimeout(() => setRoastToast(null), 1800);
+    if (reactionUsedThisEvent(current.idx, kind)) return;
+    markReactionUsed(current.idx, kind);
+    const toastMsg = kind === 'roast' ? '🔥 sent!' : '🎉 sent!';
+    setReactionToast(toastMsg);
+    setTimeout(() => setReactionToast(null), 1800);
     startTransition(async () => {
-      const res = await triggerRoast(PARTY_ID, current.idx, guestId);
+      const res = await triggerReaction(PARTY_ID, current.idx, guestId, kind);
       if (!res.ok) {
-        // Reverse the rate-limit token if it actually failed so they can retry.
-        try {
-          const raw = window.localStorage.getItem(ROAST_STORAGE_KEY) ?? '[]';
-          const keys: string[] = JSON.parse(raw);
-          window.localStorage.setItem(
-            ROAST_STORAGE_KEY,
-            JSON.stringify(keys.filter((k) => k !== `${current.idx}:${guestId}`)),
-          );
-        } catch {
-          /* ignore */
-        }
-        setRoastToast(`Roast failed: ${res.error}`);
-        setTimeout(() => setRoastToast(null), 2400);
+        unmarkReactionUsed(current.idx, kind);
+        setReactionToast(`${kind === 'roast' ? 'Roast' : 'Celebrate'} failed: ${res.error}`);
+        setTimeout(() => setReactionToast(null), 2400);
       }
     });
   };
@@ -337,19 +381,30 @@ export default function LivePage() {
         )}
       </section>
 
-      {/* Roast button */}
-      {isPerformance && current && hasUnfiredRoast && !roastUsedThisEvent(current.idx) && (
-        <button
-          onClick={onRoast}
-          disabled={pending}
-          className="mt-6 h-14 w-full rounded-full bg-gradient-to-r from-eurorose-500 to-europurp-600 text-base font-bold text-white shadow-lg shadow-europurp-900/50 active:scale-95"
-        >
-          🎤 Roast this one
-        </button>
+      {/* Reaction buttons — roast and celebrate are independent (1 of each per event). */}
+      {isPerformance && current && (
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          {REACTION_KINDS.map(({ kind, label, emoji, className }) => {
+            const available = hasUnfired[kind];
+            const used = reactionUsedThisEvent(current.idx, kind);
+            const visible = available && !used;
+            if (!visible) return <div key={kind} />;
+            return (
+              <button
+                key={kind}
+                onClick={() => onReaction(kind)}
+                disabled={pending}
+                className={`h-14 rounded-full text-base font-bold shadow-lg active:scale-95 ${className}`}
+              >
+                {emoji} {label}
+              </button>
+            );
+          })}
+        </div>
       )}
-      {roastToast && (
+      {reactionToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-eurogold-500/90 px-4 py-2 text-sm font-semibold text-black">
-          {roastToast}
+          {reactionToast}
         </div>
       )}
     </main>

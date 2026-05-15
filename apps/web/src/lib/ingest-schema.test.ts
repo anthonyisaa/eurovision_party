@@ -46,9 +46,10 @@ const baseValid = () => ({
       event_idx: 2,
     },
   ],
-  roast_pool: [
-    { event_idx: 1, speaker: 'evee' as const, content: 'If they win, I quit.' },
-    { event_idx: 2, speaker: 'nala' as const, content: 'No notes. Truly.' },
+  reaction_pool: [
+    { event_idx: 1, kind: 'roast' as const, speaker: 'evee' as const, content: 'If they win, I quit.' },
+    { event_idx: 1, kind: 'celebrate' as const, speaker: 'nala' as const, content: 'Iconic. Anthem of the year.' },
+    { event_idx: 2, kind: 'roast' as const, speaker: 'nala' as const, content: 'No notes. Truly.' },
   ],
 });
 
@@ -152,12 +153,55 @@ describe('ingestPayloadSchema', () => {
     expect(res.success).toBe(false);
   });
 
-  it('accepts a payload with empty optional arrays (other_events, scheduled, roast)', () => {
+  it('accepts a payload with empty optional arrays (other_events, scheduled, reaction)', () => {
     const ok = baseValid();
     ok.other_events = [];
     ok.scheduled_commentary = [];
-    ok.roast_pool = [];
+    ok.reaction_pool = [];
     const res = ingestPayloadSchema.safeParse(ok);
+    expect(res.success).toBe(true);
+  });
+
+  it('rejects a reaction_pool entry with an unknown kind', () => {
+    const bad = baseValid() as Record<string, unknown>;
+    (bad.reaction_pool as Array<Record<string, unknown>>).push({
+      event_idx: 2,
+      kind: 'shrug',
+      speaker: 'nala',
+      content: 'meh',
+    });
+    const res = ingestPayloadSchema.safeParse(bad);
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      const issue = res.error.issues.find(
+        (i) => i.path[0] === 'reaction_pool' && i.path[2] === 'kind',
+      );
+      expect(issue).toBeDefined();
+    }
+  });
+
+  it('accepts a legacy roast_pool (back-compat)', () => {
+    const legacy = {
+      yt_video_id: 'abc12345678',
+      performances: [
+        {
+          running_order: 1,
+          country_code: 'MD',
+          artist: 'Satoshi',
+          song_title: 'Viva',
+          start_seconds: 100,
+          end_seconds: 200,
+          vibe_blurb: 'wild',
+          fun_fact: 'won the rehearsal',
+        },
+      ],
+      other_events: [],
+      scheduled_commentary: [],
+      roast_pool: [
+        { event_idx: 1, speaker: 'nala', content: 'classic' },
+      ],
+    };
+    const res = ingestPayloadSchema.safeParse(legacy);
     expect(res.success).toBe(true);
   });
 });

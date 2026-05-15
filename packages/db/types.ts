@@ -22,6 +22,7 @@ export type Database = {
           guest_id: string | null
           id: string
           is_commentator: boolean
+          kind: string | null
           party_id: string
           speaker: string | null
         }
@@ -32,6 +33,7 @@ export type Database = {
           guest_id?: string | null
           id?: string
           is_commentator?: boolean
+          kind?: string | null
           party_id: string
           speaker?: string | null
         }
@@ -42,6 +44,7 @@ export type Database = {
           guest_id?: string | null
           id?: string
           is_commentator?: boolean
+          kind?: string | null
           party_id?: string
           speaker?: string | null
         }

@@ -377,6 +377,7 @@ export interface IngestCounts {
   other_events: number;
   scheduled_commentary: number;
   roast_pool: number;
+  celebrate_pool: number;
   countries_updated: number;
 }
 
@@ -451,6 +452,7 @@ export async function ingestPayload(
       other_events: 0,
       scheduled_commentary: 0,
       roast_pool: 0,
+      celebrate_pool: 0,
       countries_updated: 0,
     }) as IngestCounts,
   };

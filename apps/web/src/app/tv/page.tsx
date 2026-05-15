@@ -715,10 +715,23 @@ function BubbleStack({
       )}
       <AnimatePresence initial={false}>
         {bubbles.map((b) => {
+          const kind = b.kind ?? 'scheduled';
+          // Roast = fiery rose/orange; Celebrate = gold; Scheduled = speaker color.
           const isNala = b.speaker === 'nala';
-          const colorClass = isNala
-            ? 'border-eurorose-500/50 bg-eurorose-500/20 text-eurorose-100'
-            : 'border-europurp-500/50 bg-europurp-500/20 text-europurp-100';
+          let colorClass: string;
+          let prefix: string;
+          if (kind === 'roast') {
+            colorClass = 'border-eurorose-500/70 bg-eurorose-500/25 text-eurorose-50';
+            prefix = '🔥 ';
+          } else if (kind === 'celebrate') {
+            colorClass = 'border-eurogold-400/70 bg-eurogold-500/25 text-eurogold-50';
+            prefix = '🎉 ';
+          } else {
+            colorClass = isNala
+              ? 'border-eurorose-500/50 bg-eurorose-500/20 text-eurorose-100'
+              : 'border-europurp-500/50 bg-europurp-500/20 text-europurp-100';
+            prefix = '';
+          }
           return (
             <motion.div
               key={b.id}
@@ -730,7 +743,9 @@ function BubbleStack({
               className={`max-w-full rounded-2xl border px-4 py-3 shadow-lg backdrop-blur ${colorClass}`}
             >
               <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">
+                {prefix}
                 {b.speaker ?? 'commentator'}
+                {kind !== 'scheduled' && ` · ${kind}`}
               </p>
               <p className="mt-1 text-sm font-medium leading-snug md:text-base">
                 {b.content}

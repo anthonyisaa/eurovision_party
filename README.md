@@ -37,9 +37,17 @@ A condensed sequence for the host. Read top-to-bottom on party day.
 
    Get it from <https://supabase.com/dashboard/project/euhwxkwpnskjmngjfqtd/settings/api>.
 
-2. **Producer JSON for the show** — paste a complete JSON payload of performances, scheduled commentary, roast pool, and other events. Use this prompt with Gemini/Grok + a YouTube transcript link:
+2. **Producer JSON for the show** — three external LLMs feed into the final payload:
 
-   > "For the Eurovision show in this YouTube video, give me a JSON object matching this exact schema..."
+   - **Step 2a (Gemini): video info only.** Gemini watches the YouTube recording and returns performances + other_events with timestamps. No commentary, no reactions.
+   - **Step 2b (Grok): commentary sentiment & cues.** Grok pulls recent X/Twitter sentiment per song and produces roast angles + celebrate angles.
+   - **Step 2c (ChatGPT): combine into the final ingest JSON.** ChatGPT marries the two outputs, applies Nala (catty/over-it) and Evee (enthusiastic/unhinged) personalities, and emits the schema `/admin/setup` expects.
+
+   The reaction pool entries are tagged `kind: "roast"` or `kind: "celebrate"` so guests can do either (or both — one of each per performance). The phone shows two buttons; the TV color-codes the bubbles (🔥 roast = rose, 🎉 celebrate = gold).
+
+   See the **Producer prompts** section near the bottom of this README for the exact prompts to copy into Gemini, Grok, and ChatGPT.
+
+   Final payload shape pasted into `/admin/setup`:
 
    ```json
    {
@@ -60,18 +68,20 @@ A condensed sequence for the host. Read top-to-bottom on party day.
          "content": "Oh Moldova, you came dressed as a disco ball that's seen things.",
          "event_idx": 1 }
      ],
-     "roast_pool": [
-       { "event_idx": 1, "speaker": "evee",
-         "content": "If they win, I'm shaving my eyebrows." }
+     "reaction_pool": [
+       { "event_idx": 1, "kind": "roast",     "speaker": "evee",
+         "content": "If they win, I'm shaving my eyebrows." },
+       { "event_idx": 1, "kind": "celebrate", "speaker": "nala",
+         "content": "Camp icon behaviour. I'm in love." }
      ]
    }
    ```
 
    - All `_seconds` are offsets from the start of the YouTube video.
    - `category` for `other_events` must be one of `opening|interval|voting|result`.
-   - Speakers must be `nala` or `evee`.
+   - Speakers are `nala` or `evee`. Reaction kinds are `roast` or `celebrate`.
    - Aim for 2–3 `scheduled_commentary` lines per performance, spaced 30–50s apart.
-   - Aim for 1–2 `roast_pool` entries per performance (these are pulled by the phone "🎤 Roast" button).
+   - Aim for 1–2 of each reaction kind per performance (≈3–4 `reaction_pool` entries per song).
 
 3. **Boot the web app locally:**
 
@@ -180,6 +190,149 @@ The Electron app stays on your laptop and points at the same Supabase project. U
 | YouTube ads or paywall in Electron | Sign into your YT Premium account in the YouTube window. Persistent partition retains it. |
 | Skipped commentary after fast-forward | `fire_due_commentary` RPC fires every row whose `trigger_seconds <= current AND fired=false`. If you scrub 5 minutes forward, expect 2–3 bubbles to burst at once. Backward scrubs don't re-fire (rows stay `fired=true`). |
 | "Look at the TV" on phone during voting | Expected. Phones are dumb. The /tv shows the actual deliberation progress. |
+
+---
+
+## Producer prompts (Gemini → Grok → ChatGPT)
+
+Run these in order after the broadcast YouTube recording is available. Each prompt assumes you'll paste its JSON output into the next prompt's "Inputs" block.
+
+### Prompt 1 — Gemini (video info only)
+
+> You are a Eurovision logistics analyst. I'm going to give you a YouTube video of the Eurovision 2026 Grand Final (or a semi-final). Watch it and produce a JSON object describing the structural events of the broadcast. **Do not invent commentary, jokes, or reactions** — that comes from a separate pass.
+>
+> **Output schema (return ONLY this JSON, no prose):**
+>
+> ```json
+> {
+>   "yt_video_id": "<the 11-character video id>",
+>   "performances": [
+>     {
+>       "running_order": <int starting at 1>,
+>       "country_code": "<ISO 3166-1 alpha-2, uppercase>",
+>       "artist": "<as announced on stage>",
+>       "song_title": "<as announced on stage>",
+>       "start_seconds": <video offset where the performance begins>,
+>       "end_seconds": <video offset where applause/cut-away ends>,
+>       "vibe_blurb": "<one sentence describing the staging/genre, neutral tone>",
+>       "fun_fact": "<one sentence of trivia about the act or song>"
+>     }
+>   ],
+>   "other_events": [
+>     { "category": "opening",  "start_seconds": <int>, "description": "<short>" },
+>     { "category": "interval", "start_seconds": <int>, "description": "<short>" },
+>     { "category": "voting",   "start_seconds": <int>, "description": "<short>" },
+>     { "category": "result",   "start_seconds": <int>, "description": "<short>" }
+>   ]
+> }
+> ```
+>
+> Rules:
+> - `category` is exactly one of `opening | interval | voting | result`. Use `result` for the points-reveal portion.
+> - Performances must be ordered by `start_seconds` ascending. No duplicate `country_code`s.
+> - If you cannot determine an exact `_seconds` value, round to the nearest second; never make up a value.
+> - Output ONLY the JSON object. No backticks. No commentary about the show.
+>
+> Video: `<paste YouTube URL>`
+
+### Prompt 2 — Grok (commentary sentiment + roast/celebrate cues)
+
+> You have live access to X (Twitter). I'm going to give you a list of Eurovision performances from a recent show. For each one, return commentary cues drawn from the actual public reaction in the last 48 hours. Be tonally accurate — if a song was widely roasted, surface that; if it was beloved, surface that too. **Roast and celebrate angles are separate; both must be filled even for divisive songs.**
+>
+> **Inputs (paste this from Prompt 1's output):**
+>
+> ```json
+> { "yt_video_id": "...", "performances": [ ... ] }
+> ```
+>
+> **Output schema (return ONLY this JSON):**
+>
+> ```json
+> {
+>   "songs": [
+>     {
+>       "running_order": <int>,
+>       "country_code": "<2-letter>",
+>       "sentiment": "<love | divisive | meme | snoozy | dark-horse | universal-hate — one word>",
+>       "talking_points": [
+>         "<short cue, e.g. 'rumored political subtext'>",
+>         "<short cue, e.g. 'choreography reportedly stolen from K-pop group X'>"
+>       ],
+>       "roast_cues": [
+>         "<sharp, specific, drawn from real online reaction>",
+>         "<another roast angle, ideally non-overlapping>"
+>       ],
+>       "celebrate_cues": [
+>         "<genuine praise angle, also drawn from real reaction>",
+>         "<another celebrate angle>"
+>       ]
+>     }
+>   ]
+> }
+> ```
+>
+> Rules:
+> - Every performance gets at least 2 `roast_cues` and 2 `celebrate_cues`, even if the public lean is one-sided — find dissent for the unloved and skepticism for the beloved.
+> - Cues are short, punchy, party-friendly. No URLs, no usernames, no slurs.
+> - Output ONLY the JSON object. No prose.
+
+### Prompt 3 — ChatGPT (combine + apply Nala/Evee personalities)
+
+> You are the head writer for two fictional Eurovision commentators:
+> - **Nala** — catty, over-it cat-lady; deadpan; ages everything; gives points only grudgingly.
+> - **Evee** — manic chaos goblin; unhinged enthusiasm; loves everything sincerely or sarcastically; never neutral.
+>
+> Combine the two inputs below into one ingest payload for the Eurojury party app. Apply the Nala/Evee voices to every line, alternating who speaks.
+>
+> **Inputs:**
+>
+> ```json
+> // Output of Prompt 1 (Gemini): video info
+> { "yt_video_id": "...", "performances": [...], "other_events": [...] }
+> ```
+>
+> ```json
+> // Output of Prompt 2 (Grok): commentary cues
+> { "songs": [...] }
+> ```
+>
+> **Output schema (return ONLY this JSON; this is what gets pasted into /admin/setup):**
+>
+> ```json
+> {
+>   "yt_video_id": "<from Gemini>",
+>   "performances": [ /* exactly as Gemini returned, unchanged */ ],
+>   "other_events":  [ /* exactly as Gemini returned, unchanged */ ],
+>   "scheduled_commentary": [
+>     {
+>       "trigger_seconds": <int, within the performance window>,
+>       "speaker": "nala" | "evee",
+>       "content": "<one or two sentence line in that speaker's voice, drawing on Grok's talking_points>",
+>       "event_idx": <performance running_order>
+>     }
+>   ],
+>   "reaction_pool": [
+>     {
+>       "event_idx": <performance running_order>,
+>       "kind": "roast" | "celebrate",
+>       "speaker": "nala" | "evee",
+>       "content": "<single-sentence line, drawing on Grok's roast_cues or celebrate_cues>"
+>     }
+>   ]
+> }
+> ```
+>
+> Rules:
+> - For each performance produce:
+>   - **2–3 `scheduled_commentary` lines** spaced 30–50 seconds apart inside its `start_seconds`–`end_seconds` window, alternating speakers.
+>   - **1–2 `roast` reactions** drawn from `roast_cues`.
+>   - **1–2 `celebrate` reactions** drawn from `celebrate_cues`.
+> - Sentiment from Grok shapes tone: a `universal-hate` song gets sharper roasts, a `love` song gets sincere celebrate lines.
+> - Each line is one or two sentences max. No URLs, no hashtags, no @mentions.
+> - Speakers alternate naturally; don't let one dominate within a single song.
+> - `scheduled_commentary` must be ordered by `trigger_seconds` ascending across the whole array.
+> - Performances and other_events arrays from Gemini pass through verbatim.
+> - Output ONLY the JSON object.
 
 ---
 

@@ -36,8 +36,8 @@ cp -R packages/shared "$DEPLOY_DIR/packages/shared"
 
 echo "→ Rewriting workspace:* refs to file: refs..."
 sed -i '' \
-  -e 's|"@eurojury/db": "\*"|"@eurojury/db": "file:./packages/db"|g' \
-  -e 's|"@eurojury/shared": "\*"|"@eurojury/shared": "file:./packages/shared"|g' \
+  -e 's|"@eurojury/db": "workspace:\*"|"@eurojury/db": "file:./packages/db"|g' \
+  -e 's|"@eurojury/shared": "workspace:\*"|"@eurojury/shared": "file:./packages/shared"|g' \
   "$DEPLOY_DIR/package.json"
 
 echo "→ Flattening tsconfig.json (no longer extends ../../)..."

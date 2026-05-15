@@ -42,7 +42,18 @@ const scheduledCommentarySchema = z.object({
   event_idx: z.number().int().positive().optional(),
 });
 
-const roastEntrySchema = z.object({
+const reactionKindSchema = z.enum(['roast', 'celebrate']);
+
+const reactionEntrySchema = z.object({
+  event_idx: z.number().int().positive(),
+  kind: reactionKindSchema,
+  speaker: speakerSchema,
+  content: z.string().min(1),
+});
+
+// Legacy: pre-celebrate payloads used a roast_pool without `kind`.
+// Accepted for back-compat; the RPC tags each entry as 'roast'.
+const legacyRoastEntrySchema = z.object({
   event_idx: z.number().int().positive(),
   speaker: speakerSchema,
   content: z.string().min(1),
@@ -54,7 +65,8 @@ export const ingestPayloadSchema = z
     performances: z.array(performanceSchema).min(1),
     other_events: z.array(otherEventSchema),
     scheduled_commentary: z.array(scheduledCommentarySchema),
-    roast_pool: z.array(roastEntrySchema),
+    reaction_pool: z.array(reactionEntrySchema).optional().default([]),
+    roast_pool: z.array(legacyRoastEntrySchema).optional().default([]),
   })
   .superRefine((data, ctx) => {
     // Performances: start_seconds <= end_seconds (sanity) and the array
@@ -120,7 +132,9 @@ export type IngestPayload = z.infer<typeof ingestPayloadSchema>;
 export type IngestPerformance = z.infer<typeof performanceSchema>;
 export type IngestOtherEvent = z.infer<typeof otherEventSchema>;
 export type IngestScheduledCommentary = z.infer<typeof scheduledCommentarySchema>;
-export type IngestRoastEntry = z.infer<typeof roastEntrySchema>;
+export type IngestReactionEntry = z.infer<typeof reactionEntrySchema>;
+/** @deprecated Use IngestReactionEntry with kind='roast'. */
+export type IngestRoastEntry = z.infer<typeof legacyRoastEntrySchema>;
 
 // Actual results paste format — used at reveal time.
 export const actualResultsSchema = z
