@@ -153,6 +153,17 @@ function TvPageInner() {
         {phase}
       </div>
 
+      {/* Manual-event-override pill — top-left, only when the host has pinned an event.
+          Easy to miss otherwise: the now-playing card stops following the video. */}
+      {party?.manual_event_idx != null && (
+        <div className="pointer-events-auto fixed left-4 top-4 z-40 rounded-full border border-eurogold-400/70 bg-eurogold-500/90 px-4 py-2 text-sm font-bold text-black shadow-lg backdrop-blur">
+          📌 Manual override · event #{party.manual_event_idx}
+          <span className="ml-2 font-normal opacity-80">
+            (clear from /admin → Force current event)
+          </span>
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
         {phase === 'lobby' && (
           <LobbyPhase
