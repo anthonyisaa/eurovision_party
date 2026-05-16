@@ -6,6 +6,7 @@ import { supabaseBrowser } from '@/lib/supabase-browser';
 import { getGuestIdClient } from '@/lib/guest-id';
 import { useCurrentEvent } from '@/lib/use-current-event';
 import { useEventTimeline } from '@/lib/use-event-timeline';
+import { useParty } from '@/lib/use-party';
 import { submitReaction } from '../actions/reactions';
 import { triggerReaction, type ReactionKind } from '../actions/roast';
 import type { Database } from '@eurojury/db/types';
@@ -68,6 +69,7 @@ export default function LivePage() {
   // Shared event/timeline subscriptions — same data /tv consumes.
   const { current, effectiveSeconds, effectivePaused } = useCurrentEvent(PARTY_ID);
   const { timeline } = useEventTimeline(PARTY_ID);
+  const { party } = useParty(PARTY_ID);
 
   // Initial bootstrap — guest id, country lookup, this guest's prior reactions.
   useEffect(() => {
@@ -103,6 +105,11 @@ export default function LivePage() {
   useEffect(() => {
     if (loaded && !guestId) router.replace('/');
   }, [loaded, guestId, router]);
+
+  // Phones follow the host: when phase flips to voting, jump to the ballot.
+  useEffect(() => {
+    if (party?.phase === 'voting') router.replace('/vote');
+  }, [party?.phase, router]);
 
   // Performance index (1-based) for the "Performance N of M" pill.
   const performanceInfo = useMemo(() => {

@@ -18,7 +18,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabaseBrowser } from '@/lib/supabase-browser';
 import { getGuestIdClient } from '@/lib/guest-id';
-import { lockVotes, POINTS_POOL } from '../actions/votes';
+import { lockVotes } from '../actions/votes';
+import { POINTS_POOL } from './points-pool';
 import type { Database } from '@eurojury/db/types';
 
 type Country = Database['public']['Tables']['countries']['Row'];
@@ -141,6 +142,15 @@ export default function VoteClient() {
   useEffect(() => {
     if (loaded && !guestId) router.replace('/');
   }, [loaded, guestId, router]);
+
+  // Phones follow the host: leave the ballot when phase moves past voting.
+  // Pre-voting phases (lobby/live) → /live. Post-voting (reveal/closed) → /live too,
+  // since the TV owns the reveal experience and phones are just along for the ride.
+  useEffect(() => {
+    if (!party) return;
+    if (party.phase === 'lobby') router.replace('/lobby');
+    else if (party.phase !== 'voting') router.replace('/live');
+  }, [party?.phase, party, router]);
 
   // Realtime: parties (phase) + votes (lock counter).
   useEffect(() => {

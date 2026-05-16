@@ -3,13 +3,7 @@
 import { z } from 'zod';
 import { supabaseService } from '@/lib/supabase-service';
 import { getPartyId } from '@/lib/party-id';
-
-export type ActionResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
-
-// Standard Eurovision points pool. Order matters — index 0 == position 1 == 12 pts.
-export const POINTS_POOL = [12, 10, 8, 7, 6, 5, 4, 3, 2, 1] as const;
+import { POINTS_POOL } from '../vote/points-pool';
 
 const RankingItemSchema = z.object({
   points: z.number().int().refine((p) => POINTS_POOL.includes(p as 12)),

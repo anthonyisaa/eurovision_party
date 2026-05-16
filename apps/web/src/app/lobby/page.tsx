@@ -102,6 +102,11 @@ export default function LobbyPage() {
     }
   }, [loaded, guestId, me, router]);
 
+  // Phones follow the host: when phase flips to voting, jump to the ballot.
+  useEffect(() => {
+    if (party?.phase === 'voting') router.replace('/vote');
+  }, [party?.phase, router]);
+
   // Realtime: guests, parties (phase), side_bets.
   useEffect(() => {
     const chan = supabase
