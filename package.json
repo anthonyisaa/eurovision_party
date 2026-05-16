@@ -10,5 +10,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "lint": "pnpm --filter @eurojury/web lint"
+  },
+  "dependencies": {
+    "next": "15.5.18"
   }
 }
