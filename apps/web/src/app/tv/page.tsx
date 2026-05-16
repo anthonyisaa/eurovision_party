@@ -609,12 +609,22 @@ function loadYouTubeApi(): Promise<void> {
   return ytApiPromise;
 }
 
+interface YouTubePlayer {
+  getCurrentTime: () => number;
+  getPlayerState: () => number;
+  playVideo: () => void;
+  unMute: () => void;
+  mute: () => void;
+}
+
 function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const playerRef = useRef<{ getCurrentTime: () => number; getPlayerState: () => number } | null>(null);
+  const playerRef = useRef<YouTubePlayer | null>(null);
   const supabase = useMemo(() => supabaseBrowser(), []);
   const tickInFlight = useRef(false);
   const elementId = useMemo(() => `yt-player-${Math.random().toString(36).slice(2, 8)}`, []);
+  const [started, setStarted] = useState(false);
+  const [ready, setReady] = useState(false);
 
   // Mount the player.
   useEffect(() => {
@@ -623,21 +633,22 @@ function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }
       if (cancelled || !containerRef.current) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const YT = (window as any).YT;
-      // The YT API replaces the div with the iframe; ensure we keep our wrapper.
       playerRef.current = new YT.Player(elementId, {
         videoId,
         playerVars: {
-          autoplay: 1,
+          autoplay: 0,
           modestbranding: 1,
           rel: 0,
+          playsinline: 1,
         },
         events: {
-          onReady: (e: { target: { playVideo: () => void } }) => {
-            try {
-              e.target.playVideo();
-            } catch {
-              /* autoplay blocked — user has to click play */
-            }
+          onReady: () => {
+            if (!cancelled) setReady(true);
+          },
+          onStateChange: (e: { data: number }) => {
+            // YT.PlayerState.PLAYING === 1. If the user hits play via the
+            // native YT controls (bypassing our overlay), still hide our overlay.
+            if (e.data === 1 && !cancelled) setStarted(true);
           },
         },
       });
@@ -646,6 +657,18 @@ function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }
       cancelled = true;
     };
   }, [videoId, elementId]);
+
+  const handleStart = () => {
+    const player = playerRef.current;
+    if (!player) return;
+    try {
+      player.unMute();
+      player.playVideo();
+      setStarted(true);
+    } catch {
+      /* swallow — user can retry */
+    }
+  };
 
   // Tick loop: poll currentTime, upsert parties, fire due commentary.
   useEffect(() => {
@@ -708,6 +731,27 @@ function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }
       <div ref={containerRef} className="absolute inset-0">
         <div id={elementId} className="h-full w-full" />
       </div>
+      {!started && (
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={!ready}
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-black/70 text-white backdrop-blur-sm transition hover:bg-black/60 disabled:opacity-60"
+          aria-label="Start broadcast"
+        >
+          <div className="flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-eurogold-400 to-eurorose-500 text-4xl shadow-2xl shadow-eurorose-900/60 transition group-hover:scale-105">
+            ▶
+          </div>
+          <p className="text-lg font-bold">
+            {ready ? 'Start broadcast' : 'Loading player…'}
+          </p>
+          {ready && (
+            <p className="text-xs text-white/70">
+              Chrome blocks autoplay. One click and the show is live.
+            </p>
+          )}
+        </button>
+      )}
     </div>
   );
 }
