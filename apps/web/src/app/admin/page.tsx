@@ -27,6 +27,9 @@ import {
   advanceReveal,
   setFakeBroadcast,
   tickFakeBroadcast,
+  resetParty,
+  removeGuest,
+  setGuestCountries,
   type Phase,
 } from '../actions/admin';
 import type { Database } from '@eurojury/db/types';
@@ -35,6 +38,7 @@ type PartyRow = Database['public']['Tables']['parties']['Row'];
 type EventRow = Database['public']['Tables']['event_timeline']['Row'];
 type SideBet = Database['public']['Tables']['side_bets']['Row'];
 type Guest = Database['public']['Tables']['guests']['Row'];
+type Country = Database['public']['Tables']['countries']['Row'];
 
 const PHASES: Phase[] = ['lobby', 'live', 'voting', 'reveal', 'closed'];
 
@@ -53,6 +57,8 @@ export default function AdminPage() {
   const [timeline, setTimeline] = useState<EventRow[]>([]);
   const [sideBets, setSideBets] = useState<SideBet[]>([]);
   const [hostGuest, setHostGuest] = useState<Guest | null>(null);
+  const [guests, setGuests] = useState<Guest[]>([]);
+  const [countries, setCountries] = useState<Country[]>([]);
   const [stats, setStats] = useState({ guests: 0, voters: 0, reactions: 0 });
   const [loaded, setLoaded] = useState(false);
 
@@ -80,10 +86,21 @@ export default function AdminPage() {
         .select('*')
         .eq('party_id', partyId)
         .order('created_at', { ascending: true });
+      const guestsRes = await supabase
+        .from('guests')
+        .select('*')
+        .eq('party_id', partyId)
+        .order('joined_at', { ascending: true });
+      const countriesRes = await supabase
+        .from('countries')
+        .select('*')
+        .order('name', { ascending: true });
       if (cancelled) return;
       if (partyRes.data) setParty(partyRes.data);
       setTimeline(timelineRes.data ?? []);
       setSideBets(betsRes.data ?? []);
+      setGuests(guestsRes.data ?? []);
+      setCountries(countriesRes.data ?? []);
       setLoaded(true);
     })();
     return () => {
@@ -201,7 +218,15 @@ export default function AdminPage() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'guests', filter: `party_id=eq.${partyId}` },
-        () => refreshStats(),
+        () => {
+          refreshStats();
+          supabase
+            .from('guests')
+            .select('*')
+            .eq('party_id', partyId)
+            .order('joined_at', { ascending: true })
+            .then(({ data }) => setGuests(data ?? []));
+        },
       )
       .on(
         'postgres_changes',
@@ -329,6 +354,14 @@ export default function AdminPage() {
             <RevealSection party={party} partyId={partyId} guestId={guestId} />
           )}
           <StatsSection stats={stats} />
+          <GuestsSection
+            partyId={partyId}
+            guestId={guestId}
+            hostGuestId={party.host_guest_id}
+            guests={guests}
+            countries={countries}
+          />
+          <DangerZoneSection partyId={partyId} guestId={guestId} />
         </>
       )}
     </main>
@@ -982,5 +1015,246 @@ function ConfirmDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+// --- guests management ------------------------------------------------
+
+function GuestsSection({
+  partyId,
+  guestId,
+  hostGuestId,
+  guests,
+  countries,
+}: {
+  partyId: string;
+  guestId: string;
+  hostGuestId: string | null;
+  guests: Guest[];
+  countries: Country[];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Guests</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Swap a guest&apos;s assigned countries, or remove them.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {guests.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No guests yet.</p>
+        ) : (
+          guests.map((g) => (
+            <GuestRow
+              key={g.id}
+              guest={g}
+              partyId={partyId}
+              guestId={guestId}
+              isHost={g.id === hostGuestId}
+              countries={countries}
+              otherGuests={guests.filter((x) => x.id !== g.id)}
+            />
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function GuestRow({
+  guest,
+  partyId,
+  guestId,
+  isHost,
+  countries,
+  otherGuests,
+}: {
+  guest: Guest;
+  partyId: string;
+  guestId: string;
+  isHost: boolean;
+  countries: Country[];
+  otherGuests: Guest[];
+}) {
+  const [pending, startTransition] = useTransition();
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [c1, setC1] = useState<string>(guest.assigned_country_1 ?? '');
+  const [c2, setC2] = useState<string>(guest.assigned_country_2 ?? '');
+
+  // Countries already taken by OTHER guests at either slot — hide them so the
+  // host can't pick a value that the DB unique index would reject anyway.
+  const taken = new Set<string>();
+  for (const og of otherGuests) {
+    if (og.assigned_country_1) taken.add(og.assigned_country_1);
+    if (og.assigned_country_2) taken.add(og.assigned_country_2);
+  }
+  const optionsFor = (current: string, otherSlot: string) =>
+    countries.filter(
+      (c) =>
+        c.code === current || (!taken.has(c.code) && c.code !== otherSlot),
+    );
+
+  const dirty =
+    c1 !== (guest.assigned_country_1 ?? '') ||
+    c2 !== (guest.assigned_country_2 ?? '');
+
+  const onSave = () => {
+    startTransition(async () => {
+      const res = await setGuestCountries(
+        partyId,
+        guestId,
+        guest.id,
+        c1 || null,
+        c2 || null,
+      );
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success('Countries updated');
+    });
+  };
+
+  const onRemove = () => {
+    startTransition(async () => {
+      const res = await removeGuest(partyId, guestId, guest.id);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Removed ${guest.display_name}`);
+      setConfirmRemove(false);
+    });
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border border-border/50 bg-secondary/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate text-sm font-semibold">
+          {guest.display_name}
+          {isHost && (
+            <span className="ml-2 rounded-full bg-eurogold-500/20 px-2 py-0.5 text-[10px] uppercase tracking-widest text-eurogold-400">
+              host
+            </span>
+          )}
+        </p>
+        {!isHost && (
+          <button
+            onClick={() => setConfirmRemove(true)}
+            disabled={pending}
+            className="rounded-md border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <select
+          value={c1}
+          disabled={pending}
+          onChange={(e) => setC1(e.target.value)}
+          className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">— none —</option>
+          {optionsFor(c1, c2).map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.flag_emoji} {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={c2}
+          disabled={pending}
+          onChange={(e) => setC2(e.target.value)}
+          className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">— none —</option>
+          {optionsFor(c2, c1).map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.flag_emoji} {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {dirty && (
+        <Button
+          onClick={onSave}
+          disabled={pending}
+          className="h-10 w-full"
+        >
+          Save countries
+        </Button>
+      )}
+      {confirmRemove && (
+        <ConfirmDialog
+          open={confirmRemove}
+          title={`Remove ${guest.display_name}?`}
+          body="Their votes, reactions, predictions and side-bet picks will be deleted. This cannot be undone."
+          confirmLabel="Remove guest"
+          onConfirm={onRemove}
+          onCancel={() => setConfirmRemove(false)}
+          pending={pending}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- danger zone ------------------------------------------------------
+
+function DangerZoneSection({
+  partyId,
+  guestId,
+}: {
+  partyId: string;
+  guestId: string;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const onReset = () => {
+    startTransition(async () => {
+      const res = await resetParty(partyId, guestId);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success('Party reset to a fresh state');
+      setConfirmReset(false);
+    });
+  };
+
+  return (
+    <Card className="border-destructive/40 bg-destructive/5">
+      <CardHeader>
+        <CardTitle className="text-destructive">Danger zone</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Wipes guests, votes, reactions, predictions, side bets, chat,
+          timeline and scheduled commentary. You stay as host.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <Button
+          onClick={() => setConfirmReset(true)}
+          disabled={pending}
+          variant="destructive"
+          className="h-12 w-full"
+        >
+          Start a fresh party
+        </Button>
+        {confirmReset && (
+          <ConfirmDialog
+            open={confirmReset}
+            title="Wipe this party?"
+            body="Everyone will be kicked. All votes, reactions, predictions, side bets, chat, timeline and scheduled commentary will be deleted. The YouTube video and producer payload will need to be re-ingested. This cannot be undone."
+            confirmLabel="Yes — wipe it all"
+            onConfirm={onReset}
+            onCancel={() => setConfirmReset(false)}
+            pending={pending}
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }

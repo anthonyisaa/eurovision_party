@@ -460,6 +460,182 @@ export async function ingestPayload(
 
 // --- actual results --------------------------------------------------
 
+// --- reset / wipe ----------------------------------------------------
+
+/**
+ * Hard reset — wipe a party back to a fresh "just-created" state.
+ *
+ * Removes: guests (cascades votes/reactions/predictions/side_bet_picks),
+ * event_timeline, scheduled_commentary, side_bets, chat_messages.
+ * Resets parties row to defaults. Preserves: parties row itself, the host's
+ * own guest record (so they don't have to rejoin to keep the admin gate
+ * intact), parties.host_guest_id, parties.cohost_guest_id, parties.name,
+ * parties.contest_year, parties.commentator_tone. countries table is global,
+ * untouched.
+ */
+export async function resetParty(
+  partyId: string,
+  guestId: string,
+): Promise<ActionResult<true>> {
+  const host = await assertHost(partyId, guestId);
+  if (!host.ok) return host;
+
+  const supabase = supabaseService();
+
+  // 1. Delete guests EXCEPT the host's own guest row. Cascades wipe
+  //    votes/reactions/predictions/side_bet_picks for the deleted guests.
+  const hostGuestId = host.party.host_guest_id;
+  const guestsDel = hostGuestId
+    ? supabase.from('guests').delete().eq('party_id', partyId).neq('id', hostGuestId)
+    : supabase.from('guests').delete().eq('party_id', partyId);
+  const r1 = await guestsDel;
+  if (r1.error) return { ok: false, error: `guests: ${r1.error.message}` };
+
+  // 2. If host's guest row still exists, clear THEIR votes/reactions/predictions
+  //    and side-bet picks so the host isn't left mid-game either. The host row
+  //    itself stays so admin auth keeps working.
+  if (hostGuestId) {
+    const r2a = await supabase.from('votes').delete().eq('guest_id', hostGuestId);
+    if (r2a.error) return { ok: false, error: `votes: ${r2a.error.message}` };
+    const r2b = await supabase.from('reactions').delete().eq('guest_id', hostGuestId);
+    if (r2b.error) return { ok: false, error: `reactions: ${r2b.error.message}` };
+    const r2c = await supabase.from('predictions').delete().eq('guest_id', hostGuestId);
+    if (r2c.error) return { ok: false, error: `predictions: ${r2c.error.message}` };
+    const r2d = await supabase.from('side_bet_picks').delete().eq('guest_id', hostGuestId);
+    if (r2d.error) return { ok: false, error: `side_bet_picks: ${r2d.error.message}` };
+  }
+
+  // 3. Wipe per-party tables.
+  const r3a = await supabase.from('chat_messages').delete().eq('party_id', partyId);
+  if (r3a.error) return { ok: false, error: `chat_messages: ${r3a.error.message}` };
+  const r3b = await supabase.from('event_timeline').delete().eq('party_id', partyId);
+  if (r3b.error) return { ok: false, error: `event_timeline: ${r3b.error.message}` };
+  const r3c = await supabase.from('scheduled_commentary').delete().eq('party_id', partyId);
+  if (r3c.error) return { ok: false, error: `scheduled_commentary: ${r3c.error.message}` };
+  // side_bets last — side_bet_picks already cascaded out via guests above.
+  const r3d = await supabase.from('side_bets').delete().eq('party_id', partyId);
+  if (r3d.error) return { ok: false, error: `side_bets: ${r3d.error.message}` };
+
+  // 4. Clear host's country assignments (host stays as a guest but starts fresh).
+  if (hostGuestId) {
+    const r4 = await supabase
+      .from('guests')
+      .update({ assigned_country_1: null, assigned_country_2: null })
+      .eq('id', hostGuestId);
+    if (r4.error) return { ok: false, error: `host countries: ${r4.error.message}` };
+  }
+
+  // 5. Reset parties row.
+  const r5 = await supabase
+    .from('parties')
+    .update({
+      phase: 'lobby',
+      yt_video_id: null,
+      yt_player_state: 'idle',
+      yt_current_seconds: 0,
+      yt_last_update_at: null,
+      manual_event_idx: null,
+      party_paused: false,
+      party_pause_reason: null,
+      party_paused_at: null,
+      highest_event_idx_reached: 0,
+      reveal_step: 0,
+      actual_results: null,
+      fake_broadcast: false,
+      fake_broadcast_started_at: null,
+    })
+    .eq('id', partyId);
+  if (r5.error) return { ok: false, error: `parties: ${r5.error.message}` };
+
+  return { ok: true, data: true };
+}
+
+// --- guest management ------------------------------------------------
+
+/**
+ * Remove a guest from the party. Cascades delete their votes, reactions,
+ * predictions and side-bet picks. Refuses to delete the host themselves —
+ * resetParty is the right tool for that.
+ */
+export async function removeGuest(
+  partyId: string,
+  guestId: string,
+  targetGuestId: string,
+): Promise<ActionResult<true>> {
+  if (!UUID_RE.test(targetGuestId)) {
+    return { ok: false, error: 'Invalid target guest id' };
+  }
+  const host = await assertHost(partyId, guestId);
+  if (!host.ok) return host;
+  if (targetGuestId === host.party.host_guest_id) {
+    return { ok: false, error: "Can't remove the host. Reset the party instead." };
+  }
+
+  const supabase = supabaseService();
+  // Defence in depth — confirm the target belongs to this party.
+  const { data: g, error: lookupErr } = await supabase
+    .from('guests')
+    .select('id, party_id')
+    .eq('id', targetGuestId)
+    .single();
+  if (lookupErr || !g) return { ok: false, error: 'Guest not found' };
+  if (g.party_id !== partyId) {
+    return { ok: false, error: 'Guest belongs to a different party' };
+  }
+
+  const { error } = await supabase.from('guests').delete().eq('id', targetGuestId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: true };
+}
+
+/**
+ * Set the two assigned countries for a guest. Either may be null. The DB
+ * enforces (a) FK to countries(code) and (b) per-party uniqueness via
+ * guests_party_country{1,2}_unique partial unique indexes and (c) the
+ * two-distinct-countries CHECK. We surface those constraint errors verbatim
+ * because they're already self-explanatory.
+ */
+export async function setGuestCountries(
+  partyId: string,
+  guestId: string,
+  targetGuestId: string,
+  country1: string | null,
+  country2: string | null,
+): Promise<ActionResult<true>> {
+  if (!UUID_RE.test(targetGuestId)) {
+    return { ok: false, error: 'Invalid target guest id' };
+  }
+  const norm = (c: string | null) =>
+    c == null || c.trim() === '' ? null : c.trim().toUpperCase();
+  const c1 = norm(country1);
+  const c2 = norm(country2);
+  if (c1 != null && c2 != null && c1 === c2) {
+    return { ok: false, error: 'The two countries must be different' };
+  }
+  const host = await assertHost(partyId, guestId);
+  if (!host.ok) return host;
+
+  const supabase = supabaseService();
+  const { data: g, error: lookupErr } = await supabase
+    .from('guests')
+    .select('id, party_id')
+    .eq('id', targetGuestId)
+    .single();
+  if (lookupErr || !g) return { ok: false, error: 'Guest not found' };
+  if (g.party_id !== partyId) {
+    return { ok: false, error: 'Guest belongs to a different party' };
+  }
+
+  const { error } = await supabase
+    .from('guests')
+    .update({ assigned_country_1: c1, assigned_country_2: c2 })
+    .eq('id', targetGuestId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: true };
+}
+
+// --- actual results --------------------------------------------------
+
 export async function setActualResults(
   partyId: string,
   guestId: string,
