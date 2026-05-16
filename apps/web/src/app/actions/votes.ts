@@ -5,6 +5,10 @@ import { supabaseService } from '@/lib/supabase-service';
 import { getPartyId } from '@/lib/party-id';
 import { POINTS_POOL } from '../vote/points-pool';
 
+type ActionResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string };
+
 const RankingItemSchema = z.object({
   points: z.number().int().refine((p) => POINTS_POOL.includes(p as 12)),
   country_code: z.string().min(2).max(3),
