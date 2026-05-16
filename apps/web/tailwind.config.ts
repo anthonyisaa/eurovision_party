@@ -39,25 +39,50 @@ const config: Config = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
-        // Eurovision palette — used directly via bg-eurogold-500 / text-eurorose-400 etc.
-        // Kept outside the shadcn HSL var system because these are accent flourishes,
-        // not full theming primitives.
-        eurogold: {
-          400: '#facc15',
-          500: '#eab308',
-          600: '#ca8a04',
-        },
+        // Vienna 2026 palette. Token names kept from the previous theme so
+        // existing usages still resolve; the colors are remapped to match
+        // Eurovision's 70th-anniversary identity:
+        //   eurorose  → the Eurovision/Austrian flag red (heart color)
+        //   eurogold  → warm Viennese-secession cream/gold (accent flourishes)
+        //   europurp  → deep ink near-black (dark surfaces, gradient base)
         eurorose: {
-          300: '#f9a8d4',
-          400: '#f472b6',
-          500: '#ec4899',
+          50:  '#FFF1F2',
+          100: '#FFE4E6',
+          200: '#FECDD3',
+          300: '#FDA4AF',
+          400: '#F87171',
+          500: '#ED2939', // primary Eurovision red
+          600: '#D1202F',
+          700: '#A81824',
+          800: '#7F121B',
+          900: '#560C12',
+          950: '#2C0609',
+        },
+        eurogold: {
+          50:  '#FAF6EC',
+          100: '#F3EBD3',
+          200: '#E9D9A8',
+          300: '#DFC57E',
+          400: '#D4B05A',
+          500: '#C99845',
+          600: '#A87B36',
+          700: '#825E29',
+          800: '#5C421D',
+          900: '#3C2B13',
+          950: '#1E160A',
         },
         europurp: {
-          500: '#8b5cf6',
-          600: '#7c3aed',
-          700: '#6d28d9',
-          800: '#5b21b6',
-          900: '#4c1d95',
+          50:  '#E8E8EE',
+          100: '#C9C8D2',
+          200: '#A6A5B4',
+          300: '#7F7E91',
+          400: '#5C5B6D',
+          500: '#3E3D4E',
+          600: '#2B2A38',
+          700: '#1F1E29',
+          800: '#15141C',
+          900: '#0E0D14',
+          950: '#07070B',
         },
       },
       borderRadius: {

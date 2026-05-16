@@ -26,29 +26,29 @@
     --radius: 0.5rem;
   }
 
-  /* Warm dark "Eurovision-after-midnight" palette. Background is deep purple-black,
-     primary is hot pink for big CTAs, accent is purple. Tweaked from shadcn's neutral
-     default so the app doesn't look like a generic admin tool. */
+  /* Vienna 2026 dark palette — Eurovision red on near-black ink with a hint
+     of cream. Mirrors the official eurovision.com 2026 brand: stark black
+     canvas, single-accent Austrian red heart, off-white type. */
   .dark {
-    --background: 270 30% 6%;
-    --foreground: 40 30% 96%;
-    --card: 270 25% 9%;
-    --card-foreground: 40 30% 96%;
-    --popover: 270 25% 9%;
-    --popover-foreground: 40 30% 96%;
-    --primary: 330 85% 60%;
+    --background: 240 12% 5%;
+    --foreground: 36 33% 96%;
+    --card: 240 10% 8%;
+    --card-foreground: 36 33% 96%;
+    --popover: 240 10% 8%;
+    --popover-foreground: 36 33% 96%;
+    --primary: 354 84% 55%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 270 20% 18%;
-    --secondary-foreground: 40 30% 96%;
-    --muted: 270 15% 16%;
-    --muted-foreground: 270 10% 70%;
-    --accent: 270 60% 45%;
-    --accent-foreground: 40 30% 96%;
-    --destructive: 0 70% 45%;
+    --secondary: 240 8% 14%;
+    --secondary-foreground: 36 33% 96%;
+    --muted: 240 6% 13%;
+    --muted-foreground: 36 8% 70%;
+    --accent: 40 55% 55%;
+    --accent-foreground: 240 12% 5%;
+    --destructive: 354 70% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 270 20% 22%;
-    --input: 270 20% 18%;
-    --ring: 330 85% 60%;
+    --border: 240 8% 18%;
+    --input: 240 8% 16%;
+    --ring: 354 84% 55%;
   }
 
   * {
@@ -58,9 +58,8 @@
   body {
     @apply bg-background text-foreground;
     background-image:
-      radial-gradient(circle at 15% -10%, rgba(236, 72, 153, 0.18), transparent 55%),
-      radial-gradient(circle at 100% 0%, rgba(139, 92, 246, 0.18), transparent 50%),
-      radial-gradient(circle at 50% 110%, rgba(234, 179, 8, 0.10), transparent 55%);
+      radial-gradient(circle at 50% -10%, rgba(237, 41, 57, 0.14), transparent 55%),
+      radial-gradient(circle at 100% 100%, rgba(201, 152, 69, 0.06), transparent 60%);
     background-attachment: fixed;
   }
 }
@@ -74,5 +73,11 @@
   }
   .tv-overlay body {
     background: transparent !important;
+  }
+
+  /* Vienna 2026 brand mark — Eurovision Song Contest white wordmark with the
+     Austrian-flag heart. Used on dark surfaces (the only place it reads). */
+  .brand-mark {
+    filter: drop-shadow(0 4px 24px rgba(237, 41, 57, 0.25));
   }
 }

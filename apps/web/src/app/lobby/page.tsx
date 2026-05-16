@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabaseBrowser } from '@/lib/supabase-browser';
@@ -177,18 +178,30 @@ export default function LobbyPage() {
 
   return (
     <main className="mx-auto w-full max-w-md space-y-6 px-4 py-6">
-      <header className="space-y-1">
-        <p className="text-xs uppercase tracking-widest text-muted-foreground">
-          Hey {me.display_name}
-        </p>
-        <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-3xl font-black tracking-tight text-transparent">
-          Lobby
-        </h1>
-        {lobbyLocked ? (
-          <p className="text-sm text-eurogold-400">
-            Show&apos;s in progress — predictions locked. Head to your TV.
+      <header className="space-y-4">
+        <div className="flex justify-center pt-2">
+          <Image
+            src="/eurovision-2026-logo.png"
+            alt="Eurovision Song Contest 2026"
+            width={300}
+            height={130}
+            priority
+            className="brand-mark h-auto w-full max-w-[260px]"
+          />
+        </div>
+        <div className="space-y-1 text-center">
+          <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">
+            Hey {me.display_name}
           </p>
-        ) : null}
+          <p className="text-xs uppercase tracking-[0.3em] text-eurorose-400">
+            Vienna · United by Music
+          </p>
+          {lobbyLocked ? (
+            <p className="pt-1 text-sm text-eurogold-400">
+              Show&apos;s in progress — predictions locked. Head to your TV.
+            </p>
+          ) : null}
+        </div>
       </header>
 
       <TeamCard me={me} countriesByCode={countriesByCode} />

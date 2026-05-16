@@ -271,7 +271,7 @@ export default function AdminPage() {
         <p className="text-xs uppercase tracking-widest text-muted-foreground">
           Host console
         </p>
-        <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-3xl font-black tracking-tight text-transparent">
+        <h1 className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-3xl font-black tracking-tight text-transparent">
           Admin
         </h1>
       </header>

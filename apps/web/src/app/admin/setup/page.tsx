@@ -120,7 +120,7 @@ export default function AdminSetupPage() {
         <p className="text-xs uppercase tracking-widest text-muted-foreground">
           Pre-show setup
         </p>
-        <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-3xl font-black tracking-tight text-transparent md:text-4xl">
+        <h1 className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-3xl font-black tracking-tight text-transparent md:text-4xl">
           Admin · Setup
         </h1>
         <p className="text-sm text-muted-foreground">

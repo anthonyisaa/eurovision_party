@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,10 +38,20 @@ export default function JoinPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-6 py-10">
       <div className="w-full max-w-sm space-y-6">
-        <div className="space-y-2 text-center">
-          <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-5xl font-black tracking-tight text-transparent">
-            Eurojury
-          </h1>
+        <div className="space-y-4 text-center">
+          <div className="flex justify-center">
+            <Image
+              src="/eurovision-2026-logo.png"
+              alt="Eurovision Song Contest 2026"
+              width={300}
+              height={130}
+              priority
+              className="brand-mark h-auto w-full max-w-[240px]"
+            />
+          </div>
+          <p className="text-xs uppercase tracking-[0.3em] text-eurorose-400">
+            Eurojury · Vienna 2026
+          </p>
           <p className="text-sm text-muted-foreground">
             You&apos;ll be assigned 2 random countries to champion. Try not to
             embarrass them.

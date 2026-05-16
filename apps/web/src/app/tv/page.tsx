@@ -292,7 +292,7 @@ function LobbyPhase({
       className="mx-auto flex min-h-screen w-full max-w-6xl flex-col items-center justify-center gap-10 px-8 py-12"
     >
       <div className="text-center">
-        <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-7xl font-black tracking-tight text-transparent md:text-9xl">
+        <h1 className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-7xl font-black tracking-tight text-transparent md:text-9xl">
           Eurojury 🇪🇺
         </h1>
         <p className="mt-3 text-xl text-muted-foreground md:text-2xl">
@@ -1114,7 +1114,7 @@ function VotingPhase({ partyId }: { partyId: string }) {
         initial={{ scale: 0.9 }}
         animate={{ scale: [0.95, 1.02, 1] }}
         transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-        className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-400 bg-clip-text text-6xl font-black tracking-tight text-transparent md:text-8xl"
+        className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-6xl font-black tracking-tight text-transparent md:text-8xl"
       >
         JURY IS DELIBERATING
       </motion.h1>
@@ -1136,7 +1136,7 @@ function VotingPhase({ partyId }: { partyId: string }) {
             initial={{ width: 0 }}
             animate={{ width: `${pct}%` }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
-            className="h-full bg-gradient-to-r from-eurorose-500 via-eurogold-400 to-europurp-500"
+            className="h-full bg-gradient-to-r from-eurorose-600 via-eurorose-400 to-eurogold-400"
           />
         </div>
       </div>
@@ -1253,7 +1253,7 @@ function ClosedPhase({
         <p className="text-xs uppercase tracking-widest text-muted-foreground">
           Eurojury · final standings
         </p>
-        <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-5xl font-black tracking-tight text-transparent md:text-7xl">
+        <h1 className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-5xl font-black tracking-tight text-transparent md:text-7xl">
           That&apos;s a wrap
         </h1>
       </header>

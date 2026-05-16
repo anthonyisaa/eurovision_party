@@ -324,7 +324,7 @@ export default function VoteClient() {
     <main className="mx-auto w-full max-w-3xl px-3 py-4">
       <header className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="bg-gradient-to-br from-eurorose-400 via-eurogold-400 to-europurp-500 bg-clip-text text-2xl font-black tracking-tight text-transparent">
+          <h1 className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-2xl font-black tracking-tight text-transparent">
             Cast your jury vote
           </h1>
           <p className="text-xs text-muted-foreground">
