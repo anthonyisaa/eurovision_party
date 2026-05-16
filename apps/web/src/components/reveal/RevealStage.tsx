@@ -215,7 +215,7 @@ export function RevealStage({
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-europurp-900 via-background to-eurorose-950 text-foreground">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-background via-background to-eurorose-950 text-foreground">
       <MuteToggle muted={muted} onChange={setMuted} />
 
       <div className="absolute inset-0 flex items-center justify-center px-8 py-12">

@@ -24,6 +24,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import { AnimatePresence, motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabaseBrowser } from '@/lib/supabase-browser';
@@ -75,7 +76,7 @@ export default function TvPage() {
 
 function LoadingFallback() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-europurp-900 via-background to-eurorose-950 p-6 text-center">
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-eurorose-950 p-6 text-center">
       <p className="text-sm text-muted-foreground">Loading…</p>
     </main>
   );
@@ -117,7 +118,7 @@ function TvPageInner() {
   // to be clickable (none currently do — the TV is read-only).
   const outerClass = isElectron
     ? 'pointer-events-none min-h-screen w-full bg-transparent text-foreground'
-    : 'min-h-screen w-full bg-gradient-to-br from-europurp-900 via-background to-eurorose-950 text-foreground';
+    : 'min-h-screen w-full bg-gradient-to-br from-background via-background to-eurorose-950 text-foreground';
 
   // Inject a body-level CSS reset for Electron transparency — Next/Tailwind
   // defaults to `bg-background` on the body; we override it from the
@@ -291,20 +292,26 @@ function LobbyPhase({
       exit={{ opacity: 0 }}
       className="mx-auto flex min-h-screen w-full max-w-6xl flex-col items-center justify-center gap-10 px-8 py-12"
     >
-      <div className="text-center">
-        <h1 className="bg-gradient-to-br from-eurorose-500 via-eurorose-300 to-eurogold-300 bg-clip-text text-7xl font-black tracking-tight text-transparent md:text-9xl">
-          Eurojury 🇪🇺
-        </h1>
-        <p className="mt-3 text-xl text-muted-foreground md:text-2xl">
-          {partyName}
+      <div className="flex flex-col items-center gap-4 text-center">
+        <Image
+          src="/eurovision-2026-logo.png"
+          alt="Eurovision Song Contest 2026"
+          width={900}
+          height={390}
+          priority
+          className="brand-mark h-auto w-full max-w-[640px]"
+        />
+        <p className="text-xs uppercase tracking-[0.4em] text-eurorose-400 md:text-sm">
+          Eurojury · Vienna · United by Music
         </p>
+        <p className="text-xl text-muted-foreground md:text-2xl">{partyName}</p>
       </div>
 
       <div className="grid w-full grid-cols-1 gap-8 md:grid-cols-[auto,1fr] md:items-center">
         {joinUrl && (
-          <div className="flex flex-col items-center gap-3 rounded-3xl border border-eurogold-500/40 bg-white p-6 shadow-2xl">
+          <div className="flex flex-col items-center gap-3 rounded-3xl border border-eurorose-500/40 bg-white p-6 shadow-2xl shadow-eurorose-900/40">
             <QRCodeSVG value={joinUrl} size={220} level="M" />
-            <p className="text-center text-xs font-bold uppercase tracking-widest text-black">
+            <p className="text-center text-xs font-bold uppercase tracking-[0.25em] text-eurorose-600">
               Scan to join
             </p>
             <p className="text-center text-xs text-black/70">{joinUrl}</p>
@@ -312,7 +319,7 @@ function LobbyPhase({
         )}
         <div className="space-y-4">
           <div>
-            <p className="text-xs uppercase tracking-widest text-eurogold-400">
+            <p className="text-xs uppercase tracking-[0.3em] text-eurorose-400">
               The jury ({guests.length})
             </p>
             <h2 className="text-3xl font-black md:text-4xl">
@@ -349,7 +356,7 @@ function LobbyPhase({
               })}
             </ul>
           )}
-          <div className="rounded-2xl border border-europurp-500/40 bg-europurp-500/10 p-4 text-sm text-europurp-300">
+          <div className="rounded-2xl border border-eurorose-500/40 bg-eurorose-500/10 p-4 text-sm text-eurorose-200">
             ⏳ Predictions lock when the show advances out of lobby phase.
           </div>
         </div>

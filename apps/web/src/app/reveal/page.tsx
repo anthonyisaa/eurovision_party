@@ -43,7 +43,7 @@ export default function RevealPage() {
 
 function RevealLoadingFallback() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-europurp-900 via-background to-eurorose-950 p-6 text-center">
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-eurorose-950 p-6 text-center">
       <p className="text-sm text-muted-foreground">Loading reveal stage…</p>
     </main>
   );
@@ -168,7 +168,7 @@ function PhoneCompanion({
   }, [supabase, partyId, revealStep]);
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-europurp-900 via-background to-eurorose-950 p-6 text-center">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-background via-background to-eurorose-950 p-6 text-center">
       <Card className="w-full max-w-sm border-eurogold-500/40 bg-card/80 backdrop-blur">
         <CardHeader>
           <CardTitle>Look at the TV 👆</CardTitle>
