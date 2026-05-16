@@ -538,53 +538,87 @@ function LivePhase({
     );
   }
 
+  // Latest reaction timestamp drives the transient ReactionsBar pop-in.
+  const latestReactionAt = useMemo(() => {
+    if (reactions.length === 0) return 0;
+    let max = 0;
+    for (const r of reactions) {
+      const t = new Date(r.cast_at).getTime();
+      if (t > max) max = t;
+    }
+    return max;
+  }, [reactions]);
+  const reactionsVisible = Date.now() - latestReactionAt < 8000;
+
+  if (!ytVideoId) {
+    return (
+      <motion.section
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-6 px-6 py-6"
+      >
+        <div className="rounded-xl border border-eurogold-500/40 bg-eurogold-500/10 p-4 text-sm">
+          <p className="font-semibold text-eurogold-400">No video set</p>
+          <p className="mt-1 text-muted-foreground">
+            Paste a payload (with{' '}
+            <code className="rounded bg-card/60 px-1">yt_video_id</code>) at{' '}
+            <code className="rounded bg-card/60 px-1">/admin/setup</code> to embed the broadcast here.
+          </p>
+        </div>
+        <NowPlayingCard
+          current={current}
+          country={country}
+          performanceInfo={performanceInfo}
+          variant="hero"
+        />
+        <div className="grid gap-6 md:grid-cols-2">
+          <ReactionsBar counts={reactionCounts} variant="hero" />
+          <BubbleStack bubbles={visibleBubbles} variant="hero" />
+        </div>
+      </motion.section>
+    );
+  }
+
+  // Cinema layout: video fills the viewport, overlays float on top.
   return (
     <motion.section
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-6 px-6 py-6"
+      className="fixed inset-0 flex items-center justify-center bg-black"
     >
-      {ytVideoId ? (
-        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-          {/* Left: video player */}
-          <div className="space-y-4">
-            <YouTubeEmbed videoId={ytVideoId} partyId={partyId} />
-            <NowPlayingCard
-              current={current}
-              country={country}
-              performanceInfo={performanceInfo}
-              variant="hero"
-            />
-          </div>
-          {/* Right: commentary stack */}
-          <aside className="space-y-4">
-            <BubbleStack bubbles={visibleBubbles} variant="hero" />
-            <ReactionsBar counts={reactionCounts} variant="hero" />
-          </aside>
-        </div>
-      ) : (
-        <>
-          <div className="rounded-xl border border-eurogold-500/40 bg-eurogold-500/10 p-4 text-sm">
-            <p className="font-semibold text-eurogold-400">No video set</p>
-            <p className="mt-1 text-muted-foreground">
-              Paste a payload (with{' '}
-              <code className="rounded bg-card/60 px-1">yt_video_id</code>) at{' '}
-              <code className="rounded bg-card/60 px-1">/admin/setup</code> to embed the broadcast here.
-            </p>
-          </div>
-          <NowPlayingCard
-            current={current}
-            country={country}
-            performanceInfo={performanceInfo}
-            variant="hero"
-          />
-          <div className="grid gap-6 md:grid-cols-2">
-            <ReactionsBar counts={reactionCounts} variant="hero" />
-            <BubbleStack bubbles={visibleBubbles} variant="hero" />
-          </div>
-        </>
-      )}
+      {/* Video: aspect-ratio preserved, fills viewport via object-contain semantics */}
+      <div className="relative h-full w-full">
+        <YouTubeEmbed videoId={ytVideoId} partyId={partyId} fillScreen />
+      </div>
+
+      {/* Now-playing — always visible, small, top-left over the video */}
+      <NowPlayingCard
+        current={current}
+        country={country}
+        performanceInfo={performanceInfo}
+        variant="overlay"
+      />
+
+      {/* Bubbles — TTL-faded; bottom-right, never long-lived */}
+      <BubbleStack bubbles={visibleBubbles} variant="overlay" />
+
+      {/* Reactions bar — pop-in only when there's been a recent reaction */}
+      <AnimatePresence>
+        {reactionsVisible && (
+          <motion.div
+            key="reactions-overlay"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.3 }}
+            className="pointer-events-none fixed bottom-4 left-4 z-20"
+          >
+            <ReactionsBar counts={reactionCounts} variant="overlay" embedded />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.section>
   );
 }
@@ -628,7 +662,15 @@ interface YouTubePlayer {
   mute: () => void;
 }
 
-function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }) {
+function YouTubeEmbed({
+  videoId,
+  partyId,
+  fillScreen = false,
+}: {
+  videoId: string;
+  partyId: string;
+  fillScreen?: boolean;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YouTubePlayer | null>(null);
   const supabase = useMemo(() => supabaseBrowser(), []);
@@ -737,8 +779,15 @@ function YouTubeEmbed({ videoId, partyId }: { videoId: string; partyId: string }
     return () => clearInterval(id);
   }, [supabase, partyId]);
 
+  // Cinema mode (fillScreen=true): container fills its parent (which is the
+  // viewport). The YT iframe fits inside; YouTube preserves the 16:9 ratio
+  // and adds its own black bars if the screen aspect differs.
+  const containerCls = fillScreen
+    ? 'relative h-full w-full bg-black'
+    : 'relative aspect-video w-full overflow-hidden rounded-xl border border-border/40 bg-black shadow-xl';
+
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/40 bg-black shadow-xl">
+    <div className={containerCls}>
       <div ref={containerRef} className="absolute inset-0">
         <div id={elementId} className="h-full w-full" />
       </div>
@@ -864,9 +913,12 @@ function NowPlayingCard({
 function ReactionsBar({
   counts,
   variant,
+  embedded = false,
 }: {
   counts: Record<number, number>;
   variant: 'overlay' | 'hero';
+  /** When true, skip the fixed-position wrapper — the caller already owns positioning (e.g. an outer motion.div). */
+  embedded?: boolean;
 }) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const ratings: Array<{ rating: number; emoji: string }> = [1, 2, 3, 4, 5].map(
@@ -874,8 +926,11 @@ function ReactionsBar({
   );
 
   if (variant === 'overlay') {
+    const wrapper = embedded
+      ? 'pointer-events-none flex items-center gap-3 rounded-full border border-border/40 bg-card/80 px-4 py-2 shadow-xl backdrop-blur'
+      : 'pointer-events-none fixed bottom-4 left-4 z-20 flex items-center gap-3 rounded-full border border-border/40 bg-card/80 px-4 py-2 shadow-xl backdrop-blur';
     return (
-      <div className="pointer-events-none fixed bottom-4 left-4 z-20 flex items-center gap-3 rounded-full border border-border/40 bg-card/80 px-4 py-2 shadow-xl backdrop-blur">
+      <div className={wrapper}>
         {ratings.map((r) => (
           <div key={r.rating} className="flex items-center gap-1">
             <span className="text-xl leading-none">{r.emoji}</span>
