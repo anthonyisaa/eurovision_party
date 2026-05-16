@@ -27,7 +27,12 @@ import {
   setActualResults,
   type IngestCounts,
 } from '../../actions/admin';
-import { ingestPayloadSchema, actualResultsSchema } from '@/lib/ingest-schema';
+import {
+  actualResultsSchema,
+  structurePayloadSchema,
+  commentaryPayloadSchema,
+  mergeStructureAndCommentary,
+} from '@/lib/ingest-schema';
 import type { Database } from '@eurojury/db/types';
 
 type PartyRow = Database['public']['Tables']['parties']['Row'];
@@ -203,6 +208,20 @@ function YtSection({
 }
 
 // --- JSON ingest ---------------------------------------------------
+//
+// Two paste boxes:
+//   1. Structure (Gemini)   — yt_video_id + performances + other_events
+//   2. Commentary (ChatGPT) — scheduled_commentary + reaction_pool,
+//                             keyed by country_code (not event_idx).
+//
+// Split because ChatGPT can't reliably emit one combined payload at the
+// sizes we need (10+ reactions/kitten/performance ≈ 500+ lines). We
+// validate each independently then merge client-side into the combined
+// shape the existing `ingest_payload` RPC consumes — no DB change.
+//
+// Either box can be re-pasted and re-ingested independently. The RPC
+// clears+reinserts atomically, so to refresh just the commentary you
+// also need the structure pasted (server needs both for the merge).
 
 function IngestSection({
   partyId,
@@ -212,52 +231,95 @@ function IngestSection({
   guestId: string;
 }) {
   const [pending, startTransition] = useTransition();
-  const [text, setText] = useState('');
+  const [structureText, setStructureText] = useState('');
+  const [commentaryText, setCommentaryText] = useState('');
   const [validation, setValidation] = useState<
-    { ok: true } | { ok: false; error: string } | null
+    { ok: true; message: string } | { ok: false; error: string } | null
   >(null);
   const [counts, setCounts] = useState<IngestCounts | null>(null);
+
+  // Build the merged IngestPayload from the two textareas. Returns either a
+  // ready-to-send JSON string + a summary, or an error to surface inline.
+  const buildMerged = (): { ok: true; json: string; summary: string } | { ok: false; error: string } => {
+    let parsedStructure: unknown;
+    try {
+      parsedStructure = JSON.parse(structureText);
+    } catch (err) {
+      return { ok: false, error: `Structure JSON parse: ${(err as Error).message}` };
+    }
+    const sRes = structurePayloadSchema.safeParse(parsedStructure);
+    if (!sRes.success) {
+      const first = sRes.error.issues[0];
+      const path = first?.path?.join('.') ?? '';
+      return {
+        ok: false,
+        error: `Structure: ${first?.message ?? 'invalid'}${path ? ` (at ${path})` : ''}`,
+      };
+    }
+
+    let parsedCommentary: unknown;
+    if (commentaryText.trim()) {
+      try {
+        parsedCommentary = JSON.parse(commentaryText);
+      } catch (err) {
+        return { ok: false, error: `Commentary JSON parse: ${(err as Error).message}` };
+      }
+    } else {
+      parsedCommentary = { scheduled_commentary: [], reaction_pool: [] };
+    }
+    const cRes = commentaryPayloadSchema.safeParse(parsedCommentary);
+    if (!cRes.success) {
+      const first = cRes.error.issues[0];
+      const path = first?.path?.join('.') ?? '';
+      return {
+        ok: false,
+        error: `Commentary: ${first?.message ?? 'invalid'}${path ? ` (at ${path})` : ''}`,
+      };
+    }
+
+    const merged = mergeStructureAndCommentary(sRes.data, cRes.data);
+    if (!merged.ok) return merged;
+
+    const p = merged.payload;
+    const roastCount = p.reaction_pool.filter((r) => r.kind === 'roast').length;
+    const celebrateCount = p.reaction_pool.filter((r) => r.kind === 'celebrate').length;
+    const summary =
+      `${p.performances.length} performances, ` +
+      `${p.other_events.length} other events, ` +
+      `${p.scheduled_commentary.length} commentary, ` +
+      `${roastCount} roasts + ${celebrateCount} celebrates`;
+    return { ok: true, json: JSON.stringify(p), summary };
+  };
 
   const validate = () => {
     setCounts(null);
     setValidation(null);
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(text);
-    } catch (err) {
-      setValidation({ ok: false, error: `JSON parse: ${(err as Error).message}` });
+    const built = buildMerged();
+    if (!built.ok) {
+      setValidation(built);
       return;
     }
-    const z = ingestPayloadSchema.safeParse(parsedJson);
-    if (!z.success) {
-      const first = z.error.issues[0];
-      const path = first?.path?.join('.') ?? '';
-      setValidation({
-        ok: false,
-        error: `${first?.message ?? 'invalid'}${path ? ` (at ${path})` : ''}`,
-      });
-      return;
-    }
-    setValidation({ ok: true });
-    const reactionEntries = (z.data.reaction_pool ?? []).length + (z.data.roast_pool ?? []).length;
-    toast.success(
-      `Valid: ${z.data.performances.length} performances, ` +
-        `${z.data.scheduled_commentary.length} commentary, ` +
-        `${reactionEntries} reactions (roast/celebrate), ` +
-        `${z.data.other_events.length} other events`,
-    );
+    setValidation({ ok: true, message: built.summary });
+    toast.success(`Valid: ${built.summary}`);
   };
 
   const ingest = () => {
     setCounts(null);
+    const built = buildMerged();
+    if (!built.ok) {
+      setValidation(built);
+      toast.error(built.error);
+      return;
+    }
     startTransition(async () => {
-      const res = await ingestPayload(partyId, guestId, text);
+      const res = await ingestPayload(partyId, guestId, built.json);
       if (!res.ok) {
         toast.error(res.error);
         setValidation({ ok: false, error: res.error });
         return;
       }
       setCounts(res.data);
+      setValidation(null);
       toast.success(
         `Ingested ${res.data.performances} performances, ` +
           `${res.data.scheduled_commentary} commentary, ` +
@@ -272,23 +334,59 @@ function IngestSection({
       <CardHeader>
         <CardTitle>Ingest producer JSON</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Idempotent — re-ingesting clears existing rows for this party first.
+          Paste Gemini&apos;s structural output in the first box and ChatGPT&apos;s
+          kittens commentary in the second. They&apos;re merged on submit by{' '}
+          <code>country_code</code> → performance. Idempotent — re-ingest clears
+          existing rows for this party first.
         </p>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <Textarea
-          rows={25}
-          spellCheck={false}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder='{"yt_video_id": "...", "performances": [...], "other_events": [...], "scheduled_commentary": [...], "reaction_pool": [{ "event_idx": 1, "kind": "roast"|"celebrate", "speaker": "nala"|"evee", "content": "..." }]}'
-          className="font-mono text-xs"
-        />
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Step A · Video structure (Gemini)
+            </label>
+            <span className="text-[10px] text-muted-foreground">
+              yt_video_id · performances · other_events
+            </span>
+          </div>
+          <Textarea
+            rows={14}
+            spellCheck={false}
+            value={structureText}
+            onChange={(e) => setStructureText(e.target.value)}
+            placeholder='{"yt_video_id": "Yy510SZZDw4", "performances": [{ "running_order": 1, "country_code": "MD", ... }], "other_events": [{ "category": "opening", "start_seconds": 0, "description": "..." }]}'
+            className="font-mono text-xs"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Step B · Kittens commentary (ChatGPT)
+            </label>
+            <span className="text-[10px] text-muted-foreground">
+              scheduled_commentary · reaction_pool (keyed by country_code)
+            </span>
+          </div>
+          <Textarea
+            rows={18}
+            spellCheck={false}
+            value={commentaryText}
+            onChange={(e) => setCommentaryText(e.target.value)}
+            placeholder='{"scheduled_commentary": [{ "trigger_seconds": 815, "country_code": "MD", "speaker": "nala", "content": "..." }], "reaction_pool": [{ "country_code": "MD", "kind": "roast", "speaker": "evee", "content": "..." }]}'
+            className="font-mono text-xs"
+          />
+        </div>
+
         <div className="flex flex-wrap gap-2">
           <Button onClick={validate} variant="secondary" disabled={pending}>
             Validate
           </Button>
-          <Button onClick={ingest} disabled={pending || !text.trim()}>
+          <Button
+            onClick={ingest}
+            disabled={pending || !structureText.trim()}
+          >
             {pending ? 'Ingesting…' : 'Ingest payload'}
           </Button>
         </div>
@@ -298,7 +396,7 @@ function IngestSection({
           </pre>
         )}
         {validation && validation.ok && !counts && (
-          <p className="text-xs text-eurogold-400">✓ Validation passed</p>
+          <p className="text-xs text-eurogold-400">✓ {validation.message}</p>
         )}
         {counts && (
           <div className="rounded-md border border-eurogold-500/40 bg-eurogold-500/10 p-3 text-sm">

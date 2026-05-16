@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { ingestPayloadSchema, actualResultsSchema } from './ingest-schema';
+import {
+  ingestPayloadSchema,
+  actualResultsSchema,
+  structurePayloadSchema,
+  commentaryPayloadSchema,
+  mergeStructureAndCommentary,
+} from './ingest-schema';
 
 // Build a minimal valid payload and let each test mutate one field.
 const baseValid = () => ({
@@ -203,6 +209,196 @@ describe('ingestPayloadSchema', () => {
     };
     const res = ingestPayloadSchema.safeParse(legacy);
     expect(res.success).toBe(true);
+  });
+});
+
+// --- Split-ingest (Gemini structure + ChatGPT commentary) -------------
+
+const baseStructure = () => ({
+  yt_video_id: 'Yy510SZZDw4',
+  performances: [
+    {
+      running_order: 1,
+      country_code: 'MD',
+      artist: 'Satoshi',
+      song_title: 'Big Money',
+      start_seconds: 788,
+      end_seconds: 990,
+      vibe_blurb: 'crypto goblincore',
+      fun_fact: 'first MD entry to mention NFTs',
+    },
+    {
+      running_order: 2,
+      country_code: 'SE',
+      artist: 'FELICIA',
+      song_title: 'Mango',
+      start_seconds: 1025,
+      end_seconds: 1206,
+      vibe_blurb: 'tropical malaise',
+      fun_fact: 'recorded in three studios over one weekend',
+    },
+  ],
+  other_events: [
+    { category: 'opening' as const, start_seconds: 0, description: 'Hosts open' },
+  ],
+});
+
+const baseCommentary = () => ({
+  scheduled_commentary: [
+    {
+      trigger_seconds: 800,
+      speaker: 'nala' as const,
+      content: 'Here we go.',
+      country_code: 'MD',
+    },
+    {
+      trigger_seconds: 1100,
+      speaker: 'evee' as const,
+      content: 'A mango supremacy.',
+      country_code: 'SE',
+    },
+  ],
+  reaction_pool: [
+    { country_code: 'MD', kind: 'roast' as const, speaker: 'evee' as const, content: 'If they win, I quit.' },
+    { country_code: 'MD', kind: 'celebrate' as const, speaker: 'nala' as const, content: 'Iconic.' },
+    { country_code: 'SE', kind: 'roast' as const, speaker: 'nala' as const, content: 'No notes.' },
+  ],
+});
+
+describe('structurePayloadSchema', () => {
+  it('accepts a valid structure-only payload', () => {
+    const res = structurePayloadSchema.safeParse(baseStructure());
+    expect(res.success).toBe(true);
+  });
+
+  it('defaults other_events to []', () => {
+    const minimal = baseStructure() as Record<string, unknown>;
+    delete minimal.other_events;
+    const res = structurePayloadSchema.safeParse(minimal);
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.other_events).toEqual([]);
+  });
+
+  it('rejects duplicate country_code', () => {
+    const bad = baseStructure();
+    bad.performances[1]!.country_code = 'MD';
+    const res = structurePayloadSchema.safeParse(bad);
+    expect(res.success).toBe(false);
+  });
+});
+
+describe('commentaryPayloadSchema', () => {
+  it('accepts a valid commentary-only payload', () => {
+    const res = commentaryPayloadSchema.safeParse(baseCommentary());
+    expect(res.success).toBe(true);
+  });
+
+  it('accepts commentary without country_code (opening/interval lines)', () => {
+    const ok = {
+      scheduled_commentary: [
+        { trigger_seconds: 0, speaker: 'nala' as const, content: 'Show starts.' },
+      ],
+      reaction_pool: [],
+    };
+    const res = commentaryPayloadSchema.safeParse(ok);
+    expect(res.success).toBe(true);
+  });
+
+  it('rejects reaction_pool entry missing country_code', () => {
+    const bad = {
+      scheduled_commentary: [],
+      reaction_pool: [
+        { kind: 'roast', speaker: 'nala', content: 'no key' },
+      ],
+    };
+    const res = commentaryPayloadSchema.safeParse(bad);
+    expect(res.success).toBe(false);
+  });
+
+  it('rejects out-of-order scheduled_commentary', () => {
+    const bad = baseCommentary();
+    bad.scheduled_commentary[1]!.trigger_seconds = 500;
+    const res = commentaryPayloadSchema.safeParse(bad);
+    expect(res.success).toBe(false);
+  });
+});
+
+describe('mergeStructureAndCommentary', () => {
+  it('merges country_code to event_idx correctly', () => {
+    const sRes = structurePayloadSchema.safeParse(baseStructure());
+    const cRes = commentaryPayloadSchema.safeParse(baseCommentary());
+    expect(sRes.success && cRes.success).toBe(true);
+    if (!sRes.success || !cRes.success) return;
+    const out = mergeStructureAndCommentary(sRes.data, cRes.data);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.payload.scheduled_commentary[0]!.event_idx).toBe(1);
+    expect(out.payload.scheduled_commentary[1]!.event_idx).toBe(2);
+    expect(out.payload.reaction_pool[0]!.event_idx).toBe(1);
+    expect(out.payload.reaction_pool[2]!.event_idx).toBe(2);
+  });
+
+  it('matches country_code case-insensitively', () => {
+    const sRes = structurePayloadSchema.safeParse(baseStructure());
+    const commentary = {
+      scheduled_commentary: [],
+      reaction_pool: [
+        { country_code: 'md', kind: 'roast' as const, speaker: 'nala' as const, content: 'x' },
+      ],
+    };
+    const cRes = commentaryPayloadSchema.safeParse(commentary);
+    expect(sRes.success && cRes.success).toBe(true);
+    if (!sRes.success || !cRes.success) return;
+    const out = mergeStructureAndCommentary(sRes.data, cRes.data);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.payload.reaction_pool[0]!.event_idx).toBe(1);
+  });
+
+  it('rejects commentary referencing a country_code missing from structure', () => {
+    const sRes = structurePayloadSchema.safeParse(baseStructure());
+    const commentary = {
+      scheduled_commentary: [],
+      reaction_pool: [
+        { country_code: 'IT', kind: 'roast' as const, speaker: 'nala' as const, content: 'x' },
+      ],
+    };
+    const cRes = commentaryPayloadSchema.safeParse(commentary);
+    expect(sRes.success && cRes.success).toBe(true);
+    if (!sRes.success || !cRes.success) return;
+    const out = mergeStructureAndCommentary(sRes.data, cRes.data);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toMatch(/IT/);
+  });
+
+  it('handles an empty commentary payload', () => {
+    const sRes = structurePayloadSchema.safeParse(baseStructure());
+    const cRes = commentaryPayloadSchema.safeParse({});
+    expect(sRes.success && cRes.success).toBe(true);
+    if (!sRes.success || !cRes.success) return;
+    const out = mergeStructureAndCommentary(sRes.data, cRes.data);
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.payload.scheduled_commentary).toEqual([]);
+      expect(out.payload.reaction_pool).toEqual([]);
+    }
+  });
+
+  it('preserves scheduled_commentary entries without country_code (no event_idx)', () => {
+    const sRes = structurePayloadSchema.safeParse(baseStructure());
+    const commentary = {
+      scheduled_commentary: [
+        { trigger_seconds: 0, speaker: 'nala' as const, content: 'Welcome!' },
+      ],
+      reaction_pool: [],
+    };
+    const cRes = commentaryPayloadSchema.safeParse(commentary);
+    expect(sRes.success && cRes.success).toBe(true);
+    if (!sRes.success || !cRes.success) return;
+    const out = mergeStructureAndCommentary(sRes.data, cRes.data);
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.payload.scheduled_commentary[0]!.event_idx).toBeUndefined();
+    }
   });
 });
 

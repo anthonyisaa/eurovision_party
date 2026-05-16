@@ -37,19 +37,22 @@ A condensed sequence for the host. Read top-to-bottom on party day.
 
    Get it from <https://supabase.com/dashboard/project/euhwxkwpnskjmngjfqtd/settings/api>.
 
-2. **Producer JSON for the show** — three external LLMs feed into the final payload:
+2. **Producer JSON for the show** — three external LLMs feed into two pasted blobs:
 
-   - **Step 2a (Gemini): video info only.** Gemini watches the YouTube recording and returns performances + other_events with timestamps. No commentary, no reactions.
-   - **Step 2b (Grok): commentary sentiment & cues.** Grok pulls recent X/Twitter sentiment per song and produces roast angles + celebrate angles.
-   - **Step 2c (ChatGPT): combine into the final ingest JSON.** ChatGPT marries the two outputs, applies Nala (catty/over-it) and Evee (enthusiastic/unhinged) personalities, and emits the schema `/admin/setup` expects.
+   - **Step 2a (Gemini): video structure.** Gemini watches the YouTube recording and returns `yt_video_id` + `performances` + `other_events` with timestamps. No commentary, no reactions. **→ Paste into Box A on `/admin/setup`.**
+   - **Step 2b (Grok): commentary sentiment & cues.** Grok pulls recent X/Twitter sentiment per song and produces roast angles + celebrate angles. Not pasted directly — feeds Prompt 3.
+   - **Step 2c (ChatGPT): kittens commentary.** ChatGPT applies the Nala/Evee voices to the Grok cues and emits only `scheduled_commentary` + `reaction_pool`, keyed by `country_code`. **→ Paste into Box B on `/admin/setup`.**
 
-   The reaction pool entries are tagged `kind: "roast"` or `kind: "celebrate"` so guests can do either (or both — one of each per performance). The phone shows two buttons; the TV color-codes the bubbles (🔥 roast = rose, 🎉 celebrate = gold).
+   The reaction pool entries are tagged `kind: "roast"` or `kind: "celebrate"` so guests can do either (or both). The phone shows two buttons; the TV color-codes the bubbles (🔥 roast = rose, 🎉 celebrate = gold).
+
+   **Why two boxes?** ChatGPT can't reliably return one combined JSON when reaction counts climb (≥10/kitten/performance ≈ 500+ entries). Splitting keeps each response well inside the model's output limit. The page merges them by `country_code → running_order` before ingesting; the on-disk DB shape is unchanged.
 
    See the **Producer prompts** section near the bottom of this README for the exact prompts to copy into Gemini, Grok, and ChatGPT.
 
-   Final payload shape pasted into `/admin/setup`:
+   Shapes pasted into `/admin/setup`:
 
    ```json
+   // Box A — Structure (Gemini)
    {
      "yt_video_id": "Yy510SZZDw4",
      "performances": [
@@ -62,16 +65,21 @@ A condensed sequence for the host. Read top-to-bottom on party day.
        { "category": "interval", "start_seconds": 5400, "description": "Interval act" },
        { "category": "voting",   "start_seconds": 7200, "description": "Lines open" },
        { "category": "result",   "start_seconds": 9000, "description": "Results begin" }
-     ],
+     ]
+   }
+   ```
+
+   ```json
+   // Box B — Kittens commentary (ChatGPT)
+   {
      "scheduled_commentary": [
-       { "trigger_seconds": 815, "speaker": "nala",
-         "content": "Oh Moldova, you came dressed as a disco ball that's seen things.",
-         "event_idx": 1 }
+       { "trigger_seconds": 815, "country_code": "MD", "speaker": "nala",
+         "content": "Oh Moldova, you came dressed as a disco ball that's seen things." }
      ],
      "reaction_pool": [
-       { "event_idx": 1, "kind": "roast",     "speaker": "evee",
+       { "country_code": "MD", "kind": "roast",     "speaker": "evee",
          "content": "If they win, I'm shaving my eyebrows." },
-       { "event_idx": 1, "kind": "celebrate", "speaker": "nala",
+       { "country_code": "MD", "kind": "celebrate", "speaker": "nala",
          "content": "Camp icon behaviour. I'm in love." }
      ]
    }
@@ -80,8 +88,9 @@ A condensed sequence for the host. Read top-to-bottom on party day.
    - All `_seconds` are offsets from the start of the YouTube video.
    - `category` for `other_events` must be one of `opening|interval|voting|result`.
    - Speakers are `nala` or `evee`. Reaction kinds are `roast` or `celebrate`.
+   - `country_code` in Box B must match a `country_code` from Box A (case-insensitive). Opening/interval/voting/result commentary lines may omit `country_code`.
    - Aim for 2–3 `scheduled_commentary` lines per performance, spaced 30–50s apart.
-   - Aim for 1–2 of each reaction kind per performance (≈3–4 `reaction_pool` entries per song).
+   - Aim for 1–2 of each reaction kind per performance (≈3–4 `reaction_pool` entries per song). Raise this in Prompt 3 if you want more reaction depth — schema has no upper bound.
 
 3. **Boot the web app locally:**
 
@@ -276,18 +285,18 @@ Run these in order after the broadcast YouTube recording is available. Each prom
 > - Cues are short, punchy, party-friendly. No URLs, no usernames, no slurs.
 > - Output ONLY the JSON object. No prose.
 
-### Prompt 3 — ChatGPT (combine + apply Nala/Evee personalities)
+### Prompt 3 — ChatGPT (kittens commentary, keyed by country_code)
 
 > You are the head writer for two fictional Eurovision commentators:
 > - **Nala** — catty, over-it cat-lady; deadpan; ages everything; gives points only grudgingly.
 > - **Evee** — manic chaos goblin; unhinged enthusiasm; loves everything sincerely or sarcastically; never neutral.
 >
-> Combine the two inputs below into one ingest payload for the Eurojury party app. Apply the Nala/Evee voices to every line, alternating who speaks.
+> Read the two inputs below and emit ONLY the kittens' commentary. **Do NOT copy through the Gemini fields** (`yt_video_id`, `performances`, `other_events`) — those are pasted into a separate box and merged client-side. Keying is by `country_code`, not by integer index.
 >
 > **Inputs:**
 >
 > ```json
-> // Output of Prompt 1 (Gemini): video info
+> // Output of Prompt 1 (Gemini): video info — used as context only
 > { "yt_video_id": "...", "performances": [...], "other_events": [...] }
 > ```
 >
@@ -296,24 +305,21 @@ Run these in order after the broadcast YouTube recording is available. Each prom
 > { "songs": [...] }
 > ```
 >
-> **Output schema (return ONLY this JSON; this is what gets pasted into /admin/setup):**
+> **Output schema (return ONLY this JSON; this is what gets pasted into Box B on /admin/setup):**
 >
 > ```json
 > {
->   "yt_video_id": "<from Gemini>",
->   "performances": [ /* exactly as Gemini returned, unchanged */ ],
->   "other_events":  [ /* exactly as Gemini returned, unchanged */ ],
 >   "scheduled_commentary": [
 >     {
->       "trigger_seconds": <int, within the performance window>,
+>       "trigger_seconds": <int, within the performance window from Gemini>,
+>       "country_code": "<2-letter, must match a Gemini performance; omit for opening/interval/voting/result lines>",
 >       "speaker": "nala" | "evee",
->       "content": "<one or two sentence line in that speaker's voice, drawing on Grok's talking_points>",
->       "event_idx": <performance running_order>
+>       "content": "<one or two sentence line in that speaker's voice, drawing on Grok's talking_points>"
 >     }
 >   ],
 >   "reaction_pool": [
 >     {
->       "event_idx": <performance running_order>,
+>       "country_code": "<2-letter, must match a Gemini performance>",
 >       "kind": "roast" | "celebrate",
 >       "speaker": "nala" | "evee",
 >       "content": "<single-sentence line, drawing on Grok's roast_cues or celebrate_cues>"
@@ -331,7 +337,8 @@ Run these in order after the broadcast YouTube recording is available. Each prom
 > - Each line is one or two sentences max. No URLs, no hashtags, no @mentions.
 > - Speakers alternate naturally; don't let one dominate within a single song.
 > - `scheduled_commentary` must be ordered by `trigger_seconds` ascending across the whole array.
-> - Performances and other_events arrays from Gemini pass through verbatim.
+> - Every `country_code` you emit must exist in Gemini's `performances[].country_code` list — otherwise the merge step rejects it.
+> - **Do NOT include `yt_video_id`, `performances`, or `other_events`. Do NOT include `event_idx` — the app derives it from `country_code`.**
 > - Output ONLY the JSON object.
 
 ---
