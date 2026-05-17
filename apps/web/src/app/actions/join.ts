@@ -71,7 +71,14 @@ export async function joinParty(
 
   if (error) {
     // Postgres raises with SQLSTATE 22023 + message 'PARTY_FULL' when fewer
-    // than 2 countries remain unassigned.
+    // than 2 countries remain unassigned, or 'LINEUP_NOT_LOADED' before the
+    // producer has ingested the Gemini final.
+    if (error.message?.includes('LINEUP_NOT_LOADED')) {
+      return {
+        ok: false,
+        error: 'Lineup not loaded yet — hang tight, the producer is setting up.',
+      };
+    }
     if (error.message?.includes('PARTY_FULL')) {
       return { ok: false, error: 'Party is full — every country is claimed.' };
     }
