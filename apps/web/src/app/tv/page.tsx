@@ -620,7 +620,7 @@ function LivePhase({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 16 }}
             transition={{ duration: 0.3 }}
-            className="pointer-events-none fixed bottom-4 left-4 z-20"
+            className="pointer-events-none fixed left-4 top-1/2 z-20 -translate-y-1/2"
           >
             <ReactionsBar counts={reactionCounts} variant="overlay" embedded />
           </motion.div>
@@ -935,7 +935,7 @@ function ReactionsBar({
   if (variant === 'overlay') {
     const wrapper = embedded
       ? 'pointer-events-none flex items-center gap-3 rounded-full border border-border/40 bg-card/80 px-4 py-2 shadow-xl backdrop-blur'
-      : 'pointer-events-none fixed bottom-4 left-4 z-20 flex items-center gap-3 rounded-full border border-border/40 bg-card/80 px-4 py-2 shadow-xl backdrop-blur';
+      : 'pointer-events-none fixed left-4 top-1/2 z-20 flex -translate-y-1/2 items-center gap-3 rounded-full border border-border/40 bg-card/80 px-4 py-2 shadow-xl backdrop-blur';
     return (
       <div className={wrapper}>
         {ratings.map((r) => (
@@ -987,7 +987,7 @@ function BubbleStack({
 }) {
   const wrapperClass =
     variant === 'overlay'
-      ? 'pointer-events-none fixed bottom-4 right-4 z-20 flex w-[min(460px,40vw)] flex-col items-end gap-2'
+      ? 'pointer-events-none fixed right-4 top-1/2 z-20 flex w-[min(460px,40vw)] -translate-y-1/2 flex-col items-end gap-2'
       : 'flex flex-col gap-2 rounded-2xl border border-border/40 bg-card/40 p-4 backdrop-blur';
 
   return (
