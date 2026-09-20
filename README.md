@@ -2,6 +2,9 @@
 
 A LAN party app for Eurovision night: phones are dumb input devices, the TV is the focal point.
 
+Check out the demo here:
+https://youtu.be/ybkGIGHykTE
+
 ## Stack
 
 - **Monorepo:** pnpm workspaces
