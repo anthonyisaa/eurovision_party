@@ -118,3 +118,67 @@ export function sideBetScore(picks: SideBetPick[], bets: SideBet[]): number {
   }
   return total;
 }
+
+export interface BallotEntry {
+  /** Country the guest awarded points to. */
+  country_code: string;
+  /** Eurovision points (1,2,3,4,5,6,7,8,10,12). */
+  points: number;
+}
+
+export interface AlignmentLine {
+  country_code: string;
+  guest_points: number;
+  /** Country's actual official position (1..N) or null if outside the official ranking. */
+  official_position: number | null;
+  /** What an Eurovision-clairvoyant juror would have awarded this country (0 if not in actual top-10). */
+  ideal_points: number;
+  /** Contribution to alignment for this line: min(guest_points, ideal_points). */
+  contribution: number;
+}
+
+export interface AlignmentBreakdown {
+  /** Sum of contributions across all of the guest's votes. Max is 58 (a perfect ballot). */
+  score: number;
+  /** Per-vote rows, sorted by the guest's awarded points descending. */
+  lines: AlignmentLine[];
+  /** Number of the guest's 10 picks that landed in the actual top 10. */
+  topTenHits: number;
+}
+
+/**
+ * Score one guest's ballot for "alignment" with the official Eurovision result.
+ *
+ * The metric is Eurovision-native: each official rank maps to an "ideal"
+ * point award (1st→12, 2nd→10, 3rd→8, 4th→7, … 10th→1, 11+→0). For each
+ * country the guest awarded points to, the line contributes
+ * `min(guest_points, ideal_points)`. A perfectly-aligned ballot maxes at 58.
+ *
+ * Pure function — caller provides the rank→ideal-points lookup so this stays
+ * year-agnostic and easy to unit test. Pass `(code) => idealPointsFor(code)`
+ * from `eurovision-2026.ts` for the 2026 final.
+ */
+export function alignmentBreakdown(
+  ballot: BallotEntry[],
+  idealPoints: (code: string) => number,
+  officialPosition: (code: string) => number | null,
+): AlignmentBreakdown {
+  let score = 0;
+  let topTenHits = 0;
+  const lines: AlignmentLine[] = ballot.map((entry) => {
+    const ideal = idealPoints(entry.country_code);
+    const pos = officialPosition(entry.country_code);
+    const contribution = Math.min(entry.points, ideal);
+    score += contribution;
+    if (pos != null && pos <= 10) topTenHits += 1;
+    return {
+      country_code: entry.country_code,
+      guest_points: entry.points,
+      official_position: pos,
+      ideal_points: ideal,
+      contribution,
+    };
+  });
+  lines.sort((a, b) => b.guest_points - a.guest_points);
+  return { score, lines, topTenHits };
+}

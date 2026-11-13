@@ -3,11 +3,13 @@ import {
   tallyRoomResults,
   predictionScore,
   sideBetScore,
+  alignmentBreakdown,
   type Vote,
   type ReactionLike,
   type Prediction,
   type SideBet,
   type SideBetPick,
+  type BallotEntry,
 } from './scoring';
 
 describe('tallyRoomResults', () => {
@@ -148,5 +150,87 @@ describe('sideBetScore', () => {
       { bet_id: 'b-ghost', pick: 'yes' },
     ];
     expect(sideBetScore(picks, bets)).toBe(1);
+  });
+});
+
+describe('alignmentBreakdown', () => {
+  // Fake official ranking for the tests: 1=AA, 2=BB, 3=CC, 4=DD, … 10=JJ.
+  const SCHEME: Record<number, number> = {
+    1: 12, 2: 10, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1,
+  };
+  const POSITIONS: Record<string, number> = {
+    AA: 1, BB: 2, CC: 3, DD: 4, EE: 5, FF: 6, GG: 7, HH: 8, II: 9, JJ: 10,
+    KK: 11, LL: 12, MM: 13,
+  };
+  const idealPoints = (code: string) => {
+    const pos = POSITIONS[code];
+    return pos != null ? SCHEME[pos] ?? 0 : 0;
+  };
+  const officialPosition = (code: string) => POSITIONS[code] ?? null;
+
+  it('returns 58 for a perfectly-aligned ballot', () => {
+    const ballot: BallotEntry[] = [
+      { country_code: 'AA', points: 12 },
+      { country_code: 'BB', points: 10 },
+      { country_code: 'CC', points: 8 },
+      { country_code: 'DD', points: 7 },
+      { country_code: 'EE', points: 6 },
+      { country_code: 'FF', points: 5 },
+      { country_code: 'GG', points: 4 },
+      { country_code: 'HH', points: 3 },
+      { country_code: 'II', points: 2 },
+      { country_code: 'JJ', points: 1 },
+    ];
+    const result = alignmentBreakdown(ballot, idealPoints, officialPosition);
+    expect(result.score).toBe(58);
+    expect(result.topTenHits).toBe(10);
+  });
+
+  it('uses min(guest, ideal) for mismatched positions', () => {
+    // Guest gave 12 to the actual #2 → min(12,10)=10. Guest gave 10 to actual #1 → min(10,12)=10.
+    const ballot: BallotEntry[] = [
+      { country_code: 'BB', points: 12 },
+      { country_code: 'AA', points: 10 },
+    ];
+    const result = alignmentBreakdown(ballot, idealPoints, officialPosition);
+    expect(result.score).toBe(20);
+    expect(result.topTenHits).toBe(2);
+  });
+
+  it('countries outside the official top-10 contribute zero', () => {
+    const ballot: BallotEntry[] = [
+      { country_code: 'KK', points: 12 }, // #11 → ideal 0
+      { country_code: 'LL', points: 10 }, // #12 → ideal 0
+      { country_code: 'MM', points: 8 },  // #13 → ideal 0
+    ];
+    const result = alignmentBreakdown(ballot, idealPoints, officialPosition);
+    expect(result.score).toBe(0);
+    expect(result.topTenHits).toBe(0);
+  });
+
+  it('countries not in the official ranking at all also contribute zero', () => {
+    const ballot: BallotEntry[] = [
+      { country_code: 'ZZ', points: 12 },
+    ];
+    const result = alignmentBreakdown(ballot, idealPoints, officialPosition);
+    expect(result.score).toBe(0);
+    expect(result.lines[0]?.official_position).toBeNull();
+  });
+
+  it('sorts lines by guest_points descending', () => {
+    const ballot: BallotEntry[] = [
+      { country_code: 'BB', points: 1 },
+      { country_code: 'AA', points: 12 },
+      { country_code: 'CC', points: 5 },
+    ];
+    const result = alignmentBreakdown(ballot, idealPoints, officialPosition);
+    expect(result.lines.map((l) => l.guest_points)).toEqual([12, 5, 1]);
+  });
+
+  it('returns zero score and empty lines for an empty ballot', () => {
+    const result = alignmentBreakdown([], idealPoints, officialPosition);
+    expect(result.score).toBe(0);
+    expect(result.lines).toEqual([]);
+    expect(result.topTenHits).toBe(0);
   });
 });
